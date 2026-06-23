@@ -21,7 +21,9 @@ WORKDIR /app
 COPY package.json ./
 COPY src ./src
 COPY bridge.config.example.json ./bridge.config.example.json
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
 EXPOSE 18777
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "src/server.js", "--config", "/config/bridge.config.json"]

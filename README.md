@@ -93,14 +93,11 @@ Docker images are published only when a pushed tag points to a commit reachable 
 
 Tagged image builds install Claude Code during the Docker build. The release workflow disables Docker build cache and pulls the base image on every tagged build, so the Claude Code installer is fetched and run fresh each time.
 
-Run with mounted config and Claude profile data:
+Run with mounted Claude profile data:
 
 ```bash
-mkdir -p config
-cp bridge.config.example.json config/bridge.config.json
 docker run --rm -p 18777:18777 \
   -e BRIDGE_ADMIN_TOKEN="$(openssl rand -hex 24)" \
-  -v "$PWD/config:/config" \
   -v "$HOME/.claude:/profiles/claude-max" \
   ghcr.io/ldjx7/hermes-bridge:latest
 ```
@@ -108,21 +105,28 @@ docker run --rm -p 18777:18777 \
 Docker Compose for Docker-network-only access:
 
 ```bash
-mkdir -p config
-cp bridge.config.example.json config/bridge.config.json
 export BRIDGE_ADMIN_TOKEN="$(openssl rand -hex 24)"
 docker compose up -d
 ```
 
+The image creates `/config/bridge.config.json` from the built-in example config when that file is not mounted. That means the default Docker and Compose deployments only require the Claude Code config mount.
+
 The included `compose.yml` mounts:
 
-- `./config` to `/config` for bridge config and state
 - `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` to `/profiles/claude-max` for Claude Code config
 
 It uses `expose: 18777` and does not publish host ports. Other containers on the `hermes-internal` network can use:
 
 ```text
 http://bridge:18777/v1
+```
+
+If you want to customize bridge profiles or persist `bridge.state.json` across container recreation, mount a config directory explicitly:
+
+```yaml
+volumes:
+  - ./config:/config
+  - ${CLAUDE_CONFIG_DIR:-${HOME}/.claude}:/profiles/claude-max
 ```
 
 If you want to build without installing Claude Code in the image:

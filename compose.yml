@@ -8,7 +8,6 @@ services:
       BRIDGE_PORT: 18777
       BRIDGE_ADMIN_TOKEN: ${BRIDGE_ADMIN_TOKEN:-}
     volumes:
-      - ./config:/config
       - ${CLAUDE_CONFIG_DIR:-${HOME}/.claude}:/profiles/claude-max
     expose:
       - "18777"
