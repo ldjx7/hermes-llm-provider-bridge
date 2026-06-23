@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { listClaudeSettingsModels, resolveClaudeSettingsRoute, usesClaudeSettings } from "./claude-settings.js";
+
 export async function loadConfig(configPath = process.env.BRIDGE_CONFIG || "bridge.config.json") {
   const absolutePath = path.resolve(configPath);
   const raw = await readFile(absolutePath, "utf8");
@@ -32,6 +34,10 @@ export function listProfiles(config) {
 }
 
 export async function listExposedModels(config) {
+  if (usesClaudeSettings(config)) {
+    return await listClaudeSettingsModels(config);
+  }
+
   const { name: activeProfileName, profile: activeProfile } = await getActiveProfile(config);
   const models = new Map();
 
@@ -55,6 +61,10 @@ export async function listExposedModels(config) {
 }
 
 export async function resolveModelRoute(config, requestedModel) {
+  if (usesClaudeSettings(config)) {
+    return await resolveClaudeSettingsRoute(config, requestedModel);
+  }
+
   if (requestedModel && config.profiles?.[requestedModel]) {
     const profile = config.profiles[requestedModel];
     const model = firstModelForProfile(requestedModel, profile);

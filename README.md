@@ -1,18 +1,18 @@
 # Hermes LLM Provider Bridge
 
-OpenAI-compatible local provider bridge for Hermes. It exposes a stable `/v1` API and routes every request through the currently active global profile.
+OpenAI-compatible local provider bridge for Hermes. It exposes Claude Code CLI as a local `/v1` provider.
 
 This project is unofficial and is not affiliated with Anthropic, OpenAI, NousResearch, Hermes, or Codex.
 
-The important property is that profile switching is global. A user or admin can switch the active profile once, and every later request uses that profile until it is changed again.
+By default, the bridge discovers available models from the mounted Claude Code `settings.json` and calls `claude --model <requested-model>`.
 
 ## Flow
 
 ```text
 Hermes request
   -> http://127.0.0.1:18777/v1
-  -> bridge checks active profile from state file
-  -> bridge sends structured prompt to configured CLI backend
+  -> bridge reads Claude Code settings from /profiles/claude-max/settings.json
+  -> bridge sends a structured prompt to claude --model <requested-model>
   -> bridge returns OpenAI-compatible chat completion
 ```
 
@@ -31,31 +31,21 @@ GET  /admin/active
 POST /admin/switch
 ```
 
+The `/admin/*` profile endpoints are retained for advanced profile-based configs. They are not required by the default Claude settings mode.
+
 If `BRIDGE_ADMIN_TOKEN` or `adminToken` is configured, all `/admin/*` endpoints require:
 
 ```text
 Authorization: Bearer <token>
 ```
 
-Switch profile over HTTP:
+CLI helpers:
 
 ```bash
-curl -s -X POST http://127.0.0.1:18777/admin/switch \
-  -H 'content-type: application/json' \
-  -H "authorization: Bearer $BRIDGE_ADMIN_TOKEN" \
-  -d '{"profile":"claude-sonnet"}'
-```
-
-Switch profile with the CLI:
-
-```bash
-node src/cli.js use claude-sonnet --config bridge.config.json
-node src/cli.js current --config bridge.config.json
-node src/cli.js profiles --config bridge.config.json
 node src/cli.js probe "你好，请回复一句话" --config bridge.config.json
 ```
 
-`probe` runs a real chat completion through the currently active profile. Use it before pointing Hermes at the bridge.
+`probe` runs a real chat completion through the configured backend. Use it before pointing Hermes at the bridge.
 
 ## Local Run
 
@@ -76,10 +66,16 @@ Model: hermes-bridge
 
 ## Model Routing
 
-`GET /v1/models` returns an OpenAI-compatible model list. The bridge exposes two kinds of model ids:
+`GET /v1/models` returns an OpenAI-compatible model list derived from Claude Code settings:
 
-- `hermes-bridge`: stable alias that routes to the current active profile
-- profile names such as `claude-opus` and `claude-sonnet`: direct routes that bypass active profile switching
+```json
+{
+  "env": {
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "claude-sonnet-4-6"
+  },
+  "model": "sonnet"
+}
+```
 
 For example:
 
@@ -90,13 +86,25 @@ curl -s http://127.0.0.1:18777/v1/models
 returns model ids like:
 
 ```text
-hermes-bridge
-claude-opus
-claude-sonnet
-mock
+claude-sonnet-4-6
 ```
 
-Call the active profile through the stable alias:
+Call a listed model directly:
+
+```json
+{
+  "model": "claude-sonnet-4-6",
+  "messages": [{ "role": "user", "content": "hello" }]
+}
+```
+
+The bridge executes:
+
+```bash
+claude --model claude-sonnet-4-6
+```
+
+The compatibility alias `hermes-bridge` is still accepted but is not listed by `/v1/models`. It maps to the default model from Claude settings, such as `"model": "sonnet"`:
 
 ```json
 {
@@ -105,16 +113,7 @@ Call the active profile through the stable alias:
 }
 ```
 
-Call a specific profile directly:
-
-```json
-{
-  "model": "claude-sonnet",
-  "messages": [{ "role": "user", "content": "hello" }]
-}
-```
-
-This lets Hermes either keep one fixed model (`hermes-bridge`) or show multiple concrete models at the same time.
+This lets Hermes either show concrete Claude models or keep using one fixed model id.
 
 ## Docker
 
@@ -179,25 +178,23 @@ docker build --build-arg INSTALL_CLAUDE=false -t hermes-bridge .
 
 ## Config Shape
 
-Each profile owns a backend command and the model mapping exposed to Hermes. Keep the exposed model id stable, such as `hermes-bridge`, then switch the active profile behind it.
+The default config reads model names from mounted Claude Code settings and passes requested model names directly to Claude Code:
 
 ```json
 {
-  "stateFile": "./bridge.state.json",
-  "defaultProfile": "claude-opus",
   "maxConcurrentRequests": 1,
-  "profiles": {
-    "claude-opus": {
-      "provider": "cli-json",
-      "configDir": "/profiles/claude-max",
-      "repairRetries": 1,
-      "models": [{ "id": "hermes-bridge", "backendModel": "opus" }],
-      "command": "claude",
-      "args": ["--model", "{{backendModel}}", "--print", "{{prompt}}", "--output-format", "json"]
-    }
+  "modelSource": "claude-settings",
+  "claude": {
+    "provider": "cli-json",
+    "configDir": "/profiles/claude-max",
+    "repairRetries": 1,
+    "command": "claude",
+    "args": ["--model", "{{backendModel}}", "--print", "{{prompt}}", "--output-format", "json"]
   }
 }
 ```
+
+Profile-based routing is still supported for advanced custom configs, but it is no longer the default Docker path.
 
 The CLI backend must print JSON that looks like one of these:
 

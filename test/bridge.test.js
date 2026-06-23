@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -42,6 +42,28 @@ async function fixtureConfig() {
   return { config, configFile, callsFile };
 }
 
+async function fixtureClaudeSettingsConfig(settings) {
+  const dir = await mkdtemp(path.join(tmpdir(), "hermes-bridge-claude-"));
+  const claudeConfigDir = path.join(dir, "claude");
+  const callsFile = path.join(dir, "calls.jsonl");
+  await mkdir(claudeConfigDir, { recursive: true });
+  await writeFile(path.join(claudeConfigDir, "settings.json"), JSON.stringify(settings, null, 2));
+
+  return {
+    config: {
+      modelSource: "claude-settings",
+      claude: {
+        provider: "mock",
+        ownedBy: "claude-code",
+        configDir: claudeConfigDir,
+        mockResponse: { type: "final", content: "settings response" }
+      },
+      test: { callsFile }
+    },
+    callsFile
+  };
+}
+
 async function request(app, method, pathname, body, headers = {}) {
   const response = await app.inject({
     method,
@@ -82,6 +104,21 @@ test("models endpoint exposes the globally active profile", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.body.data[0].id, "hermes-bridge");
   assert.equal(response.body.data[0].owned_by, "local");
+});
+
+test("models endpoint can derive available models from Claude settings", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    },
+    model: "sonnet"
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "GET", "/v1/models");
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.data.map((model) => model.id), ["claude-sonnet-4-6"]);
 });
 
 test("admin switch updates global profile state for later requests", async () => {
@@ -157,6 +194,56 @@ test("chat completions can route directly to a named profile model", async () =>
 
   const calls = await readFile(callsFile, "utf8");
   assert.match(calls, /"profile":"claude-sonnet"/);
+});
+
+test("chat completions can call a Claude settings model directly", async () => {
+  const { config, callsFile } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    },
+    model: "sonnet"
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    model: "claude-sonnet-4-6",
+    messages: [{ role: "user", content: "hello" }]
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.model, "claude-sonnet-4-6");
+  assert.equal(response.body.choices[0].message.content, "settings response");
+
+  const calls = await readFile(callsFile, "utf8");
+  assert.match(calls, /"backendModel":"claude-sonnet-4-6"/);
+});
+
+test("hermes-bridge routes to the default Claude settings model without listing the alias", async () => {
+  const { config, callsFile } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "claude-opus-4-6",
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    },
+    model: "sonnet"
+  });
+  const app = createApp({ config });
+
+  const models = await request(app, "GET", "/v1/models");
+  assert.deepEqual(models.body.data.map((model) => model.id), [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6"
+  ]);
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    model: "hermes-bridge",
+    messages: [{ role: "user", content: "hello" }]
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.model, "hermes-bridge");
+
+  const calls = await readFile(callsFile, "utf8");
+  assert.match(calls, /"backendModel":"claude-sonnet-4-6"/);
 });
 
 test("chat completions converts model tool intent into OpenAI tool_calls", async () => {

@@ -3,69 +3,23 @@
     "host": "127.0.0.1",
     "port": 18777
   },
-  "stateFile": "./bridge.state.json",
-  "defaultProfile": "claude-opus",
   "maxConcurrentRequests": 1,
-  "profiles": {
-    "claude-opus": {
-      "provider": "cli-json",
-      "ownedBy": "claude-code",
-      "configDir": "/profiles/claude-max",
-      "timeoutMs": 180000,
-      "repairRetries": 1,
-      "models": [
-        {
-          "id": "hermes-bridge",
-          "backendModel": "opus"
-        }
-      ],
-      "command": "claude",
-      "args": [
-        "--model",
-        "{{backendModel}}",
-        "--print",
-        "{{prompt}}",
-        "--output-format",
-        "json",
-        "--no-session-persistence"
-      ]
-    },
-    "claude-sonnet": {
-      "provider": "cli-json",
-      "ownedBy": "claude-code",
-      "configDir": "/profiles/claude-max",
-      "timeoutMs": 180000,
-      "repairRetries": 1,
-      "models": [
-        {
-          "id": "hermes-bridge",
-          "backendModel": "sonnet"
-        }
-      ],
-      "command": "claude",
-      "args": [
-        "--model",
-        "{{backendModel}}",
-        "--print",
-        "{{prompt}}",
-        "--output-format",
-        "json",
-        "--no-session-persistence"
-      ]
-    },
-    "mock": {
-      "provider": "mock",
-      "ownedBy": "bridge",
-      "models": [
-        {
-          "id": "hermes-bridge",
-          "backendModel": "mock"
-        }
-      ],
-      "mockResponse": {
-        "type": "final",
-        "content": "mock response"
-      }
-    }
+  "modelSource": "claude-settings",
+  "claude": {
+    "provider": "cli-json",
+    "ownedBy": "claude-code",
+    "configDir": "/profiles/claude-max",
+    "timeoutMs": 180000,
+    "repairRetries": 1,
+    "command": "claude",
+    "args": [
+      "--model",
+      "{{backendModel}}",
+      "--print",
+      "{{prompt}}",
+      "--output-format",
+      "json",
+      "--no-session-persistence"
+    ]
   }
 }

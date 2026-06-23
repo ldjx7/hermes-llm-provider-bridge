@@ -7,7 +7,12 @@ import { buildRepairPrompt, buildStructuredPrompt } from "./prompt.js";
 
 export async function runProvider({ config, profileName, profile, model, request }) {
   if (profile.provider === "mock") {
-    await recordTestCall(config, { profile: profileName, model: request.model, messages: request.messages || [] });
+    await recordTestCall(config, {
+      profile: profileName,
+      model: request.model,
+      backendModel: model?.backendModel,
+      messages: request.messages || []
+    });
     if (profile.mockDelayMs) {
       await delay(profile.mockDelayMs);
     }
