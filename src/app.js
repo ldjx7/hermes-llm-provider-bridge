@@ -1,4 +1,4 @@
-import { getActiveProfile, listProfiles, switchProfile, findModel } from "./config-store.js";
+import { getActiveProfile, listExposedModels, listProfiles, switchProfile, resolveModelRoute } from "./config-store.js";
 import { errorBody, HttpError } from "./errors.js";
 import { runProvider } from "./adapters.js";
 import { chatCompletionResponse, modelsResponse, streamChatCompletionResponse } from "./openai.js";
@@ -43,8 +43,7 @@ async function handleRequest(config, limitProviderRequest, request) {
     const body = parseBody(request);
 
     if (request.method === "GET" && url.pathname === "/v1/models") {
-      const { profile } = await getActiveProfile(config);
-      return json(200, modelsResponse(profile));
+      return json(200, modelsResponse(await listExposedModels(config)));
     }
 
     if (url.pathname.startsWith("/admin/")) {
@@ -98,18 +97,17 @@ async function chatCompletions(config, body) {
     throw new HttpError(400, "Request body must include messages", "bad_request");
   }
 
-  const { name, profile } = await getActiveProfile(config);
-  const model = findModel(profile, body.model);
+  const { profileName, profile, model } = await resolveModelRoute(config, body.model);
   if (!model) {
-    throw new HttpError(400, `Active profile "${name}" has no models`, "bad_config");
+    throw new HttpError(400, `Profile "${profileName}" has no models`, "bad_config");
   }
   if (body.model && model.id !== body.model) {
-    throw new HttpError(400, `Model "${body.model}" is not exposed by active profile "${name}"`, "bad_request");
+    throw new HttpError(400, `Model "${body.model}" is not available`, "bad_request");
   }
 
   const providerResult = await runProvider({
     config,
-    profileName: name,
+    profileName,
     profile,
     model,
     request: body

@@ -74,6 +74,48 @@ API mode: Chat Completions
 Model: hermes-bridge
 ```
 
+## Model Routing
+
+`GET /v1/models` returns an OpenAI-compatible model list. The bridge exposes two kinds of model ids:
+
+- `hermes-bridge`: stable alias that routes to the current active profile
+- profile names such as `claude-opus` and `claude-sonnet`: direct routes that bypass active profile switching
+
+For example:
+
+```bash
+curl -s http://127.0.0.1:18777/v1/models
+```
+
+returns model ids like:
+
+```text
+hermes-bridge
+claude-opus
+claude-sonnet
+mock
+```
+
+Call the active profile through the stable alias:
+
+```json
+{
+  "model": "hermes-bridge",
+  "messages": [{ "role": "user", "content": "hello" }]
+}
+```
+
+Call a specific profile directly:
+
+```json
+{
+  "model": "claude-sonnet",
+  "messages": [{ "role": "user", "content": "hello" }]
+}
+```
+
+This lets Hermes either keep one fixed model (`hermes-bridge`) or show multiple concrete models at the same time.
+
 ## Docker
 
 Build:

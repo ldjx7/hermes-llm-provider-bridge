@@ -71,6 +71,11 @@ test("models endpoint exposes the globally active profile", async () => {
   let response = await request(app, "GET", "/v1/models");
   assert.equal(response.status, 200);
   assert.equal(response.body.data[0].id, "hermes-bridge");
+  assert.deepEqual(response.body.data.map((model) => model.id), [
+    "hermes-bridge",
+    "claude-opus",
+    "claude-sonnet"
+  ]);
 
   await switchProfile(config, "claude-sonnet");
   response = await request(app, "GET", "/v1/models");
@@ -122,6 +127,36 @@ test("chat completions uses active profile and returns final content", async () 
 
   const calls = await readFile(callsFile, "utf8");
   assert.match(calls, /"profile":"claude-opus"/);
+});
+
+test("chat completions can route directly to a named profile model", async () => {
+  const { config, callsFile } = await fixtureConfig();
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    model: "claude-sonnet",
+    messages: [{ role: "user", content: "where am I?" }],
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "run_shell",
+          parameters: {
+            type: "object",
+            required: ["cmd"],
+            properties: { cmd: { type: "string" } }
+          }
+        }
+      }
+    ]
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.model, "claude-sonnet");
+  assert.equal(response.body.choices[0].finish_reason, "tool_calls");
+
+  const calls = await readFile(callsFile, "utf8");
+  assert.match(calls, /"profile":"claude-sonnet"/);
 });
 
 test("chat completions converts model tool intent into OpenAI tool_calls", async () => {

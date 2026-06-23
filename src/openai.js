@@ -2,14 +2,16 @@ import crypto from "node:crypto";
 
 import { HttpError } from "./errors.js";
 
-export function modelsResponse(profile) {
+export function modelsResponse(modelsOrProfile) {
+  const models = Array.isArray(modelsOrProfile) ? modelsOrProfile : modelsOrProfile.models || [];
+  const profile = Array.isArray(modelsOrProfile) ? undefined : modelsOrProfile;
   return {
     object: "list",
-    data: (profile.models || []).map((model) => ({
+    data: models.map((model) => ({
       id: model.id,
       object: "model",
       created: 0,
-      owned_by: model.ownedBy || profile.ownedBy || profile.provider || "bridge"
+      owned_by: model.ownedBy || profile?.ownedBy || profile?.provider || "bridge"
     }))
   };
 }

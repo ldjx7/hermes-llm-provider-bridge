@@ -31,6 +31,45 @@ export function listProfiles(config) {
   return Object.keys(config.profiles || {});
 }
 
+export async function listExposedModels(config) {
+  const { name: activeProfileName, profile: activeProfile } = await getActiveProfile(config);
+  const models = new Map();
+
+  for (const model of activeProfile.models || []) {
+    models.set(model.id, {
+      id: model.id,
+      ownedBy: model.ownedBy || activeProfile.ownedBy || activeProfile.provider || "bridge",
+      profileName: activeProfileName
+    });
+  }
+
+  for (const [profileName, profile] of Object.entries(config.profiles || {})) {
+    models.set(profileName, {
+      id: profileName,
+      ownedBy: profile.ownedBy || profile.provider || "bridge",
+      profileName
+    });
+  }
+
+  return [...models.values()];
+}
+
+export async function resolveModelRoute(config, requestedModel) {
+  if (requestedModel && config.profiles?.[requestedModel]) {
+    const profile = config.profiles[requestedModel];
+    const model = firstModelForProfile(requestedModel, profile);
+    return {
+      profileName: requestedModel,
+      profile,
+      model: { ...model, id: requestedModel }
+    };
+  }
+
+  const { name, profile } = await getActiveProfile(config);
+  const model = findModel(profile, requestedModel);
+  return { profileName: name, profile, model };
+}
+
 export async function switchProfile(config, profileName) {
   if (!config.profiles?.[profileName]) {
     throw new ConfigError(`Profile "${profileName}" is not defined`);
@@ -54,6 +93,12 @@ export function findModel(profile, requestedModel) {
     if (match) return match;
   }
   return models[0];
+}
+
+function firstModelForProfile(profileName, profile) {
+  const model = (profile.models || [])[0];
+  if (model) return model;
+  return { id: profileName, backendModel: profileName };
 }
 
 async function readState(stateFile) {
