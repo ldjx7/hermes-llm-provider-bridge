@@ -79,8 +79,17 @@ Model: hermes-bridge
 Build:
 
 ```bash
-docker build -t hermes-llm-provider-bridge .
+docker build -t hermes-bridge .
 ```
+
+Published images are available from GitHub Container Registry after tagged releases:
+
+```bash
+docker pull ghcr.io/ldjx7/hermes-bridge:latest
+docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.0
+```
+
+Docker images are published only when a pushed tag points to a commit reachable from `main`. Each release publishes both the pushed tag and `latest`.
 
 Run with mounted config and Claude profile data:
 
@@ -91,13 +100,13 @@ docker run --rm -p 18777:18777 \
   -e BRIDGE_ADMIN_TOKEN="$(openssl rand -hex 24)" \
   -v "$PWD/config:/config" \
   -v "$HOME/.claude:/profiles/claude-max" \
-  hermes-llm-provider-bridge
+  ghcr.io/ldjx7/hermes-bridge:latest
 ```
 
 If you want to build without installing Claude Code in the image:
 
 ```bash
-docker build --build-arg INSTALL_CLAUDE=false -t hermes-llm-provider-bridge .
+docker build --build-arg INSTALL_CLAUDE=false -t hermes-bridge .
 ```
 
 ## Config Shape
