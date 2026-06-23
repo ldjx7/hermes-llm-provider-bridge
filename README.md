@@ -91,6 +91,8 @@ docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.0
 
 Docker images are published only when a pushed tag points to a commit reachable from `main`. Each release publishes both the pushed tag and `latest`.
 
+Tagged image builds install Claude Code during the Docker build. The release workflow disables Docker build cache and pulls the base image on every tagged build, so the Claude Code installer is fetched and run fresh each time.
+
 Run with mounted config and Claude profile data:
 
 ```bash
@@ -101,6 +103,26 @@ docker run --rm -p 18777:18777 \
   -v "$PWD/config:/config" \
   -v "$HOME/.claude:/profiles/claude-max" \
   ghcr.io/ldjx7/hermes-bridge:latest
+```
+
+Docker Compose for Docker-network-only access:
+
+```bash
+mkdir -p config
+cp bridge.config.example.json config/bridge.config.json
+export BRIDGE_ADMIN_TOKEN="$(openssl rand -hex 24)"
+docker compose up -d
+```
+
+The included `compose.yml` mounts:
+
+- `./config` to `/config` for bridge config and state
+- `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` to `/profiles/claude-max` for Claude Code config
+
+It uses `expose: 18777` and does not publish host ports. Other containers on the `hermes-internal` network can use:
+
+```text
+http://bridge:18777/v1
 ```
 
 If you want to build without installing Claude Code in the image:

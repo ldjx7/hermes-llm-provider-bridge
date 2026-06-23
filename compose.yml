@@ -1,0 +1,20 @@
+services:
+  bridge:
+    image: ghcr.io/ldjx7/hermes-bridge:latest
+    restart: unless-stopped
+    environment:
+      BRIDGE_CONFIG: /config/bridge.config.json
+      BRIDGE_HOST: 0.0.0.0
+      BRIDGE_PORT: 18777
+      BRIDGE_ADMIN_TOKEN: ${BRIDGE_ADMIN_TOKEN:-}
+    volumes:
+      - ./config:/config
+      - ${CLAUDE_CONFIG_DIR:-${HOME}/.claude}:/profiles/claude-max
+    expose:
+      - "18777"
+    networks:
+      - hermes
+
+networks:
+  hermes:
+    name: hermes-internal

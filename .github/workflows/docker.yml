@@ -73,6 +73,11 @@ jobs:
         with:
           context: .
           push: true
+          pull: true
+          no-cache: true
+          build-args: |
+            INSTALL_CLAUDE=true
+            CLAUDE_INSTALL_CACHE_BUST=${{ github.run_id }}
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.check-main-tag.outputs.tag }}
             ${{ env.IMAGE_NAME }}:latest

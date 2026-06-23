@@ -1,6 +1,7 @@
 FROM node:22-bookworm-slim
 
 ARG INSTALL_CLAUDE=true
+ARG CLAUDE_INSTALL_CACHE_BUST=manual
 
 ENV NODE_ENV=production
 ENV DISABLE_AUTOUPDATER=1
@@ -13,7 +14,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp
-RUN if [ "$INSTALL_CLAUDE" = "true" ]; then curl -fsSL https://claude.ai/install.sh | bash; fi
+RUN echo "CLAUDE_INSTALL_CACHE_BUST=${CLAUDE_INSTALL_CACHE_BUST}" \
+  && if [ "$INSTALL_CLAUDE" = "true" ]; then curl -fsSL https://claude.ai/install.sh | bash; fi
 
 WORKDIR /app
 COPY package.json ./
