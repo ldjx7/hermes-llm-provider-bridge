@@ -118,7 +118,43 @@ test("models endpoint can derive available models from Claude settings", async (
   const response = await request(app, "GET", "/v1/models");
 
   assert.equal(response.status, 200);
+  assert.equal(response.body.object, "list");
   assert.deepEqual(response.body.data.map((model) => model.id), ["claude-sonnet-4-6"]);
+  assert.equal(response.body.data[0].object, "model");
+  assert.equal(response.body.data[0].owned_by, "claude-code");
+});
+
+test("models endpoint can retrieve a single listed model", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "GET", "/v1/models/claude-sonnet-4-6");
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, {
+    id: "claude-sonnet-4-6",
+    object: "model",
+    created: 0,
+    owned_by: "claude-code"
+  });
+});
+
+test("models endpoint returns not_found for an unlisted model", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "GET", "/v1/models/hermes-bridge");
+
+  assert.equal(response.status, 404);
+  assert.equal(response.body.error.type, "not_found");
 });
 
 test("admin switch updates global profile state for later requests", async () => {
@@ -218,8 +254,8 @@ test("chat completions can call a Claude settings model directly", async () => {
   assert.match(calls, /"backendModel":"claude-sonnet-4-6"/);
 });
 
-test("hermes-bridge routes to the default Claude settings model without listing the alias", async () => {
-  const { config, callsFile } = await fixtureClaudeSettingsConfig({
+test("chat completions rejects unlisted aliases in Claude settings mode", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
     env: {
       ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "claude-opus-4-6",
       ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
@@ -239,11 +275,24 @@ test("hermes-bridge routes to the default Claude settings model without listing 
     messages: [{ role: "user", content: "hello" }]
   });
 
-  assert.equal(response.status, 200);
-  assert.equal(response.body.model, "hermes-bridge");
+  assert.equal(response.status, 400);
+  assert.match(response.body.error.message, /not available/);
+});
 
-  const calls = await readFile(callsFile, "utf8");
-  assert.match(calls, /"backendModel":"claude-sonnet-4-6"/);
+test("chat completions requires an explicit model", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    messages: [{ role: "user", content: "hello" }]
+  });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body.error.message, /include model/);
 });
 
 test("chat completions converts model tool intent into OpenAI tool_calls", async () => {
@@ -375,4 +424,18 @@ test("probe active profile runs a chat completion through the active backend", a
   assert.equal(result.profile, "claude-opus");
   assert.equal(result.model, "hermes-bridge");
   assert.equal(result.message.content, "opus response");
+});
+
+test("probe uses the exposed Claude settings model", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+
+  const result = await probeActiveProfile(config, "hello");
+
+  assert.equal(result.profile, "claude");
+  assert.equal(result.model, "claude-sonnet-4-6");
+  assert.equal(result.message.content, "settings response");
 });

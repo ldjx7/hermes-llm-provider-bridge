@@ -7,12 +7,16 @@ export function modelsResponse(modelsOrProfile) {
   const profile = Array.isArray(modelsOrProfile) ? undefined : modelsOrProfile;
   return {
     object: "list",
-    data: models.map((model) => ({
-      id: model.id,
-      object: "model",
-      created: 0,
-      owned_by: model.ownedBy || profile?.ownedBy || profile?.provider || "bridge"
-    }))
+    data: models.map((model) => modelResponse(model, profile))
+  };
+}
+
+export function modelResponse(model, profile) {
+  return {
+    id: model.id,
+    object: "model",
+    created: 0,
+    owned_by: model.ownedBy || profile?.ownedBy || profile?.provider || "bridge"
   };
 }
 

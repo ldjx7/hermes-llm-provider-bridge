@@ -1,7 +1,7 @@
 import { getActiveProfile, listExposedModels, listProfiles, switchProfile, resolveModelRoute } from "./config-store.js";
 import { errorBody, HttpError } from "./errors.js";
 import { runProvider } from "./adapters.js";
-import { chatCompletionResponse, modelsResponse, streamChatCompletionResponse } from "./openai.js";
+import { chatCompletionResponse, modelResponse, modelsResponse, streamChatCompletionResponse } from "./openai.js";
 import { createLimiter } from "./queue.js";
 
 export function createApp({ config }) {
@@ -44,6 +44,15 @@ async function handleRequest(config, limitProviderRequest, request) {
 
     if (request.method === "GET" && url.pathname === "/v1/models") {
       return json(200, modelsResponse(await listExposedModels(config)));
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/v1/models/")) {
+      const requestedModel = decodeURIComponent(url.pathname.slice("/v1/models/".length));
+      const model = (await listExposedModels(config)).find((candidate) => candidate.id === requestedModel);
+      if (!model) {
+        throw new HttpError(404, `Model "${requestedModel}" not found`, "not_found");
+      }
+      return json(200, modelResponse(model));
     }
 
     if (url.pathname.startsWith("/admin/")) {
@@ -95,6 +104,9 @@ async function chatCompletions(config, body) {
   }
   if (!Array.isArray(body.messages)) {
     throw new HttpError(400, "Request body must include messages", "bad_request");
+  }
+  if (!body.model || typeof body.model !== "string") {
+    throw new HttpError(400, "Request body must include model", "bad_request");
   }
 
   const { profileName, profile, model } = await resolveModelRoute(config, body.model);

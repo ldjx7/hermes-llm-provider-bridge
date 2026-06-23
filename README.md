@@ -24,6 +24,7 @@ The bridge serializes provider calls by default (`maxConcurrentRequests: 1`). Th
 
 ```text
 GET  /v1/models
+GET  /v1/models/{model}
 POST /v1/chat/completions
 
 GET  /admin/profiles
@@ -61,7 +62,7 @@ Hermes provider settings:
 API base URL: http://127.0.0.1:18777/v1
 API key: test
 API mode: Chat Completions
-Model: hermes-bridge
+Model: claude-sonnet-4-6
 ```
 
 ## Model Routing
@@ -104,16 +105,7 @@ The bridge executes:
 claude --model claude-sonnet-4-6
 ```
 
-The compatibility alias `hermes-bridge` is still accepted but is not listed by `/v1/models`. It maps to the default model from Claude settings, such as `"model": "sonnet"`:
-
-```json
-{
-  "model": "hermes-bridge",
-  "messages": [{ "role": "user", "content": "hello" }]
-}
-```
-
-This lets Hermes either show concrete Claude models or keep using one fixed model id.
+Chat completions require an explicit `model` value. In the default Claude settings mode, the requested model must be one of the ids returned by `GET /v1/models`; hidden aliases such as `hermes-bridge` are not accepted.
 
 ## Docker
 
@@ -127,7 +119,7 @@ Published images are available from GitHub Container Registry after tagged relea
 
 ```bash
 docker pull ghcr.io/ldjx7/hermes-bridge:latest
-docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.0
+docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.4
 ```
 
 Docker images are published only when a pushed tag points to a commit reachable from `main`. Each release publishes both the pushed tag and `latest`.

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning once tagged releases begin.
 
+## [0.1.4] - 2026-06-23
+
+### Added
+
+- Add OpenAI-compatible `GET /v1/models/{model}` model retrieval.
+- Return OpenAI-style `param` and `code` fields in error responses.
+
+### Changed
+
+- Chat completions now require an explicit `model` field.
+- Claude settings mode only accepts models returned by `GET /v1/models`.
+- Remove the hidden `hermes-bridge` alias from Claude settings mode.
+- `probe` now uses the exposed model list, so it works with the default Claude settings config.
+
 ## [0.1.3] - 2026-06-23
 
 ### Changed

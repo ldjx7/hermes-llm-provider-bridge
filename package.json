@@ -1,6 +1,6 @@
 {
   "name": "hermes-llm-provider-bridge",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "OpenAI-compatible bridge that exposes Claude Code CLI models to Hermes.",
   "type": "module",
   "bin": {

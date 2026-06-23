@@ -1,12 +1,11 @@
 import { createApp } from "./app.js";
-import { findModel, getActiveProfile } from "./config-store.js";
+import { listExposedModels } from "./config-store.js";
 import { HttpError } from "./errors.js";
 
 export async function probeActiveProfile(config, prompt = "Reply with one short sentence.") {
-  const { name, profile } = await getActiveProfile(config);
-  const model = findModel(profile);
+  const model = (await listExposedModels(config))[0];
   if (!model) {
-    throw new HttpError(400, `Active profile "${name}" has no models`, "bad_config");
+    throw new HttpError(400, "No models are available", "bad_config");
   }
 
   const app = createApp({ config });
@@ -26,7 +25,7 @@ export async function probeActiveProfile(config, prompt = "Reply with one short 
   }
 
   return {
-    profile: name,
+    profile: model.profileName || "claude",
     model: body.model,
     finishReason: body.choices?.[0]?.finish_reason,
     message: body.choices?.[0]?.message

@@ -16,28 +16,28 @@ export async function listClaudeSettingsModels(config) {
 }
 
 export async function resolveClaudeSettingsRoute(config, requestedModel) {
+  if (!requestedModel || typeof requestedModel !== "string") {
+    throw new HttpError(400, "Request body must include model", "bad_request");
+  }
+
   const settings = await readClaudeSettings(config);
   const models = configuredModels(settings);
   const provider = claudeProviderConfig(config);
-  const requested = requestedModel || "hermes-bridge";
-  const backendModel = requested === "hermes-bridge"
-    ? defaultModel(settings, models)
-    : requested;
 
-  if (!backendModel) {
+  if (models.length === 0) {
     throw new HttpError(400, "No Claude models are configured in settings.json", "bad_config");
   }
 
-  if (models.length > 0 && !models.some((model) => model.id === backendModel) && !provider.allowUnlistedModels) {
-    throw new HttpError(400, `Model "${backendModel}" is not configured in Claude settings`, "bad_request");
+  if (!models.some((model) => model.id === requestedModel)) {
+    throw new HttpError(400, `Model "${requestedModel}" is not available`, "bad_request");
   }
 
   return {
     profileName: "claude",
     profile: provider,
     model: {
-      id: requested,
-      backendModel
+      id: requestedModel,
+      backendModel: requestedModel
     }
   };
 }
@@ -94,16 +94,4 @@ function configuredModels(settings) {
   }
 
   return [...new Map([...byFamily.values()].map((model) => [model.id, model])).values()];
-}
-
-function defaultModel(settings, models) {
-  const requestedDefault = typeof settings.model === "string" ? settings.model : "";
-  const env = settings.env || {};
-  const family = requestedDefault.toUpperCase();
-
-  return env[`ANTHROPIC_DEFAULT_${family}_MODEL_NAME`]
-    || env[`ANTHROPIC_DEFAULT_${family}_MODEL`]
-    || models.find((model) => model.id === requestedDefault)?.id
-    || requestedDefault
-    || models[0]?.id;
 }
