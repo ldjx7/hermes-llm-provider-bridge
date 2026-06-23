@@ -13,10 +13,10 @@ Hermes request
   -> http://127.0.0.1:18777/v1
   -> bridge reads Claude Code settings from /profiles/claude-max/settings.json
   -> bridge sends a structured prompt to claude --model <requested-model>
-  -> bridge returns OpenAI-compatible chat completion
+  -> bridge returns OpenAI-compatible chat completion or response
 ```
 
-For tool use, the bridge does not execute tools. It asks the backend model to return structured JSON tool intent, validates it against the current Hermes `tools` list, and returns OpenAI `tool_calls` so Hermes can execute its own tools.
+For tool use, the bridge does not execute tools. It asks the backend model to return structured JSON tool intent, validates it against the current Hermes `tools` list, and returns OpenAI `tool_calls` or Responses `function_call` output items so Hermes can execute its own tools.
 
 The bridge serializes provider calls by default (`maxConcurrentRequests: 1`). This avoids multiple expensive CLI processes racing each other and keeps global profile switching predictable.
 
@@ -26,6 +26,10 @@ The bridge serializes provider calls by default (`maxConcurrentRequests: 1`). Th
 GET  /v1/models
 GET  /v1/models/{model}
 POST /v1/chat/completions
+POST /v1/responses
+GET  /v1/responses/{response_id}
+DELETE /v1/responses/{response_id}
+GET  /v1/responses/{response_id}/input_items
 
 GET  /admin/profiles
 GET  /admin/active
@@ -61,7 +65,7 @@ Hermes provider settings:
 ```text
 API base URL: http://127.0.0.1:18777/v1
 API key: test
-API mode: Chat Completions
+API mode: Chat Completions or Responses
 Model: claude-sonnet-4-6
 ```
 
@@ -107,6 +111,32 @@ claude --model claude-sonnet-4-6
 
 Chat completions require an explicit `model` value. In the default Claude settings mode, the requested model must be one of the ids returned by `GET /v1/models`; hidden aliases such as `hermes-bridge` are not accepted.
 
+## Responses API
+
+`POST /v1/responses` accepts the same listed model ids:
+
+```bash
+curl -s http://127.0.0.1:18777/v1/responses \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "claude-sonnet-4-6",
+    "input": "请只回复一句中文：测试成功"
+  }'
+```
+
+Text output is returned as a Responses `message` item with `output_text` content. Tool intent is returned as `function_call` output items:
+
+```json
+{
+  "type": "function_call",
+  "call_id": "call_...",
+  "name": "run_shell",
+  "arguments": "{\"cmd\":\"pwd\"}"
+}
+```
+
+The bridge stores responses in memory when `store` is not `false`, so they can be read or deleted through `GET /v1/responses/{response_id}` and `DELETE /v1/responses/{response_id}` while the bridge process is running. Stored response inputs can be listed with `GET /v1/responses/{response_id}/input_items`. `stream: true` returns a basic Responses server-sent event stream.
+
 ## Docker
 
 Build:
@@ -119,7 +149,7 @@ Published images are available from GitHub Container Registry after tagged relea
 
 ```bash
 docker pull ghcr.io/ldjx7/hermes-bridge:latest
-docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.4
+docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.0
 ```
 
 Docker images are published only when a pushed tag points to a commit reachable from `main`. Each release publishes both the pushed tag and `latest`.
@@ -200,7 +230,7 @@ The CLI backend must print JSON that looks like one of these:
 
 If the backend prints invalid JSON, `repairRetries` controls how many times the bridge retries with a repair prompt. Set it to `0` to fail immediately.
 
-`POST /v1/chat/completions` supports both normal JSON responses and basic OpenAI-compatible SSE when the request includes `"stream": true`.
+`POST /v1/chat/completions` and `POST /v1/responses` support both normal JSON responses and basic OpenAI-compatible SSE when the request includes `"stream": true`.
 
 ## Test
 

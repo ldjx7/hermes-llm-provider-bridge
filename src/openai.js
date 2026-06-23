@@ -78,6 +78,110 @@ export function chatCompletionResponse(request, modelResult) {
   return base;
 }
 
+export function responseProviderRequest(request) {
+  return {
+    ...request,
+    messages: responseInputMessages(request),
+    tools: normalizeResponseTools(request.tools || []),
+    tool_choice: request.tool_choice || "auto"
+  };
+}
+
+export function responseObject(request, modelResult) {
+  const normalized = normalizeModelResult(modelResult);
+  const createdAt = Math.floor(Date.now() / 1000);
+  const response = {
+    id: `resp_${crypto.randomUUID().replaceAll("-", "")}`,
+    object: "response",
+    created_at: createdAt,
+    status: "completed",
+    completed_at: createdAt,
+    error: null,
+    incomplete_details: null,
+    instructions: request.instructions || null,
+    max_output_tokens: request.max_output_tokens ?? null,
+    model: request.model,
+    output: [],
+    parallel_tool_calls: request.parallel_tool_calls ?? true,
+    previous_response_id: request.previous_response_id ?? null,
+    reasoning: request.reasoning || { effort: null, summary: null },
+    store: request.store ?? true,
+    temperature: request.temperature ?? 1,
+    text: request.text || { format: { type: "text" } },
+    tool_choice: request.tool_choice || "auto",
+    tools: request.tools || [],
+    top_p: request.top_p ?? 1,
+    truncation: request.truncation || "disabled",
+    usage: {
+      input_tokens: 0,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 0,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 0
+    },
+    user: request.user ?? null,
+    metadata: request.metadata || {}
+  };
+
+  if (normalized.type === "final") {
+    response.output.push({
+      id: `msg_${crypto.randomUUID().replaceAll("-", "")}`,
+      type: "message",
+      status: "completed",
+      role: "assistant",
+      content: [{
+        type: "output_text",
+        text: normalized.content || "",
+        annotations: []
+      }]
+    });
+    return response;
+  }
+
+  response.output.push(...validateToolCalls({
+    ...request,
+    tools: normalizeResponseTools(request.tools || [])
+  }, normalized.tool_calls || []).map((call) => ({
+    id: `fc_${crypto.randomUUID().replaceAll("-", "")}`,
+    type: "function_call",
+    status: "completed",
+    call_id: `call_${crypto.randomUUID().replaceAll("-", "")}`,
+    name: call.name,
+    arguments: JSON.stringify(call.arguments)
+  })));
+  return response;
+}
+
+export function responseInputItems(input) {
+  if (typeof input === "string") {
+    return [messageInputItem("user", input)];
+  }
+
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.map((item) => {
+    if (item?.type === "function_call" || item?.type === "function_call_output") {
+      return { ...item };
+    }
+    if (item?.role) {
+      return messageInputItem(item.role, item.content, item.id);
+    }
+    return { ...item };
+  });
+}
+
+export function responseInputItemList(items) {
+  return {
+    object: "list",
+    data: items,
+    first_id: items[0]?.id || null,
+    last_id: items[items.length - 1]?.id || null,
+    has_more: false
+  };
+}
+
 export function streamChatCompletionResponse(completion) {
   const choice = completion.choices[0];
   const message = choice.message;
@@ -123,8 +227,53 @@ export function streamChatCompletionResponse(completion) {
   ].join("");
 }
 
+export function streamResponseObject(response) {
+  const events = [
+    sseEvent("response.created", {
+      ...response,
+      status: "in_progress",
+      completed_at: null,
+      output: []
+    })
+  ];
+
+  for (const item of response.output) {
+    events.push(sseEvent("response.output_item.done", {
+      type: "response.output_item.done",
+      item
+    }));
+
+    if (item.type !== "message") continue;
+    for (const content of item.content || []) {
+      if (content.type !== "output_text") continue;
+      events.push(sseEvent("response.output_text.delta", {
+        type: "response.output_text.delta",
+        item_id: item.id,
+        output_index: 0,
+        content_index: 0,
+        delta: content.text || ""
+      }));
+      events.push(sseEvent("response.output_text.done", {
+        type: "response.output_text.done",
+        item_id: item.id,
+        output_index: 0,
+        content_index: 0,
+        text: content.text || ""
+      }));
+    }
+  }
+
+  events.push(sseEvent("response.completed", response));
+  events.push("data: [DONE]\n\n");
+  return events.join("");
+}
+
 function sse(value) {
   return `data: ${JSON.stringify(value)}\n\n`;
+}
+
+function sseEvent(event, value) {
+  return `event: ${event}\ndata: ${JSON.stringify(value)}\n\n`;
 }
 
 function normalizeModelResult(modelResult) {
@@ -160,6 +309,104 @@ function validateToolCalls(request, toolCalls) {
     validateBasicSchema(call.name, args, schemas.get(call.name));
     return { name: call.name, arguments: args };
   });
+}
+
+function responseInputMessages(request) {
+  const messages = [];
+  if (request.instructions) {
+    messages.push({ role: "system", content: contentText(request.instructions) });
+  }
+
+  if (typeof request.input === "string") {
+    messages.push({ role: "user", content: request.input });
+    return messages;
+  }
+
+  if (!Array.isArray(request.input)) {
+    return messages;
+  }
+
+  for (const item of request.input) {
+    if (item?.type === "function_call_output") {
+      messages.push({
+        role: "tool",
+        tool_call_id: item.call_id,
+        content: contentText(item.output)
+      });
+      continue;
+    }
+
+    if (item?.type === "function_call") {
+      messages.push({
+        role: "assistant",
+        content: JSON.stringify({
+          type: item.type,
+          call_id: item.call_id,
+          name: item.name,
+          arguments: item.arguments
+        })
+      });
+      continue;
+    }
+
+    if (item?.role) {
+      messages.push({
+        role: item.role,
+        content: contentText(item.content)
+      });
+    }
+  }
+
+  return messages;
+}
+
+function messageInputItem(role, content, id = `msg_${crypto.randomUUID().replaceAll("-", "")}`) {
+  return {
+    id,
+    type: "message",
+    role,
+    content: inputContent(content)
+  };
+}
+
+function inputContent(content) {
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === "string") return { type: "input_text", text: part };
+      if (part?.type) return part;
+      return { type: "input_text", text: contentText(part) };
+    });
+  }
+  return [{ type: "input_text", text: contentText(content) }];
+}
+
+function normalizeResponseTools(tools) {
+  return tools.map((tool) => {
+    if (tool?.type !== "function") return tool;
+    if (tool.function?.name) return tool;
+    return {
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters || {},
+        strict: tool.strict
+      }
+    };
+  });
+}
+
+function contentText(content) {
+  if (content === undefined || content === null) return "";
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === "string") return part;
+      if (typeof part?.text === "string") return part.text;
+      return "";
+    }).filter(Boolean).join("\n");
+  }
+  return JSON.stringify(content);
 }
 
 function normalizeArguments(argumentsValue) {

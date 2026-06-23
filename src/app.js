@@ -1,15 +1,26 @@
 import { getActiveProfile, listExposedModels, listProfiles, switchProfile, resolveModelRoute } from "./config-store.js";
 import { errorBody, HttpError } from "./errors.js";
 import { runProvider } from "./adapters.js";
-import { chatCompletionResponse, modelResponse, modelsResponse, streamChatCompletionResponse } from "./openai.js";
+import {
+  chatCompletionResponse,
+  modelResponse,
+  modelsResponse,
+  responseInputItemList,
+  responseInputItems,
+  responseObject,
+  responseProviderRequest,
+  streamChatCompletionResponse,
+  streamResponseObject
+} from "./openai.js";
 import { createLimiter } from "./queue.js";
 
 export function createApp({ config }) {
   const limitProviderRequest = createLimiter(config.maxConcurrentRequests ?? 1);
+  const responseStore = new Map();
 
   return {
     async inject({ method, url, body, headers = {} }) {
-      return await handleRequest(config, limitProviderRequest, {
+      return await handleRequest(config, limitProviderRequest, responseStore, {
         method,
         url,
         headers,
@@ -21,7 +32,7 @@ export function createApp({ config }) {
       const chunks = [];
       req.on("data", (chunk) => chunks.push(chunk));
       req.on("end", async () => {
-        const result = await handleRequest(config, limitProviderRequest, {
+        const result = await handleRequest(config, limitProviderRequest, responseStore, {
           method: req.method,
           url: req.url,
           headers: req.headers,
@@ -37,7 +48,7 @@ export function createApp({ config }) {
   };
 }
 
-async function handleRequest(config, limitProviderRequest, request) {
+async function handleRequest(config, limitProviderRequest, responseStore, request) {
   try {
     const url = new URL(request.url, "http://127.0.0.1");
     const body = parseBody(request);
@@ -77,6 +88,28 @@ async function handleRequest(config, limitProviderRequest, request) {
 
     if (request.method === "POST" && url.pathname === "/v1/chat/completions") {
       return await limitProviderRequest(() => chatCompletions(config, body));
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/responses") {
+      return await limitProviderRequest(() => responsesCreate(config, responseStore, body));
+    }
+
+    if (url.pathname.startsWith("/v1/responses/")) {
+      const [responseId, child] = url.pathname
+        .slice("/v1/responses/".length)
+        .split("/")
+        .map((part) => decodeURIComponent(part));
+      if (request.method === "GET" && child === "input_items") {
+        return json(200, responseInputItemList(storedResponseRecord(responseStore, responseId).inputItems));
+      }
+      if (request.method === "GET" && !child) {
+        return json(200, storedResponse(responseStore, responseId));
+      }
+      if (request.method === "DELETE" && !child) {
+        storedResponse(responseStore, responseId);
+        responseStore.delete(responseId);
+        return json(200, { id: responseId, object: "response", deleted: true });
+      }
     }
 
     return json(404, { error: { message: "Not found", type: "not_found" } });
@@ -129,6 +162,58 @@ async function chatCompletions(config, body) {
     return eventStream(200, streamChatCompletionResponse(response));
   }
   return json(200, response);
+}
+
+async function responsesCreate(config, responseStore, body) {
+  if (!body || typeof body !== "object") {
+    throw new HttpError(400, "Request body must be a JSON object", "bad_request");
+  }
+  if (!body.model || typeof body.model !== "string") {
+    throw new HttpError(400, "Request body must include model", "bad_request");
+  }
+  if (body.input === undefined && body.instructions === undefined) {
+    throw new HttpError(400, "Request body must include input or instructions", "bad_request");
+  }
+
+  const { profileName, profile, model } = await resolveModelRoute(config, body.model);
+  if (!model) {
+    throw new HttpError(400, `Profile "${profileName}" has no models`, "bad_config");
+  }
+  if (model.id !== body.model) {
+    throw new HttpError(400, `Model "${body.model}" is not available`, "bad_request");
+  }
+
+  const providerRequest = responseProviderRequest({ ...body, model: model.id });
+  const providerResult = await runProvider({
+    config,
+    profileName,
+    profile,
+    model,
+    request: providerRequest
+  });
+  const response = responseObject({ ...body, model: model.id }, providerResult);
+  if (response.store) {
+    responseStore.set(response.id, {
+      response,
+      inputItems: responseInputItems(body.input)
+    });
+  }
+  if (body.stream) {
+    return eventStream(200, streamResponseObject(response));
+  }
+  return json(200, response);
+}
+
+function storedResponse(responseStore, responseId) {
+  return storedResponseRecord(responseStore, responseId).response;
+}
+
+function storedResponseRecord(responseStore, responseId) {
+  const record = responseStore.get(responseId);
+  if (!record) {
+    throw new HttpError(404, `Response "${responseId}" not found`, "not_found");
+  }
+  return record;
 }
 
 function parseBody(request) {

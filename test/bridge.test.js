@@ -295,6 +295,157 @@ test("chat completions requires an explicit model", async () => {
   assert.match(response.body.error.message, /include model/);
 });
 
+test("responses create returns an OpenAI-compatible response object", async () => {
+  const { config, callsFile } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/responses", {
+    model: "claude-sonnet-4-6",
+    instructions: "Reply briefly.",
+    input: "hello"
+  });
+
+  assert.equal(response.status, 200);
+  assert.match(response.body.id, /^resp_/);
+  assert.equal(response.body.object, "response");
+  assert.equal(response.body.status, "completed");
+  assert.equal(response.body.model, "claude-sonnet-4-6");
+  assert.equal(response.body.output[0].type, "message");
+  assert.equal(response.body.output[0].role, "assistant");
+  assert.deepEqual(response.body.output[0].content, [{
+    type: "output_text",
+    text: "settings response",
+    annotations: []
+  }]);
+
+  const calls = await readFile(callsFile, "utf8");
+  assert.match(calls, /"backendModel":"claude-sonnet-4-6"/);
+  assert.match(calls, /"role":"system","content":"Reply briefly\."/);
+  assert.match(calls, /"role":"user","content":"hello"/);
+});
+
+test("responses create returns function_call output without executing tools", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  config.claude.mockResponse = {
+    type: "tool_calls",
+    tool_calls: [
+      { name: "run_shell", arguments: { cmd: "pwd" } }
+    ]
+  };
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/responses", {
+    model: "claude-sonnet-4-6",
+    input: [{ role: "user", content: "where am I?" }],
+    tools: [
+      {
+        type: "function",
+        name: "run_shell",
+        parameters: {
+          type: "object",
+          required: ["cmd"],
+          properties: { cmd: { type: "string" } }
+        }
+      }
+    ]
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.output.length, 1);
+  assert.equal(response.body.output[0].type, "function_call");
+  assert.equal(response.body.output[0].name, "run_shell");
+  assert.equal(response.body.output[0].arguments, "{\"cmd\":\"pwd\"}");
+  assert.match(response.body.output[0].call_id, /^call_/);
+});
+
+test("responses can retrieve and delete stored responses", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const created = await request(app, "POST", "/v1/responses", {
+    model: "claude-sonnet-4-6",
+    input: "hello"
+  });
+
+  const fetched = await request(app, "GET", `/v1/responses/${created.body.id}`);
+  assert.equal(fetched.status, 200);
+  assert.equal(fetched.body.id, created.body.id);
+
+  const deleted = await request(app, "DELETE", `/v1/responses/${created.body.id}`);
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(deleted.body, {
+    id: created.body.id,
+    object: "response",
+    deleted: true
+  });
+
+  const missing = await request(app, "GET", `/v1/responses/${created.body.id}`);
+  assert.equal(missing.status, 404);
+});
+
+test("responses can list stored input items", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const created = await request(app, "POST", "/v1/responses", {
+    model: "claude-sonnet-4-6",
+    input: "hello"
+  });
+
+  const response = await request(app, "GET", `/v1/responses/${created.body.id}/input_items`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.object, "list");
+  assert.equal(response.body.data.length, 1);
+  assert.equal(response.body.data[0].type, "message");
+  assert.equal(response.body.data[0].role, "user");
+  assert.deepEqual(response.body.data[0].content, [{
+    type: "input_text",
+    text: "hello"
+  }]);
+  assert.equal(response.body.first_id, response.body.data[0].id);
+  assert.equal(response.body.last_id, response.body.data[0].id);
+  assert.equal(response.body.has_more, false);
+});
+
+test("responses can return SSE for stream requests", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/responses", {
+    model: "claude-sonnet-4-6",
+    stream: true,
+    input: "hello"
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["content-type"], "text/event-stream");
+  assert.match(response.body, /event: response.created/);
+  assert.match(response.body, /event: response.output_text.delta/);
+  assert.match(response.body, /event: response.completed/);
+  assert.match(response.body, /data: \[DONE\]/);
+});
+
 test("chat completions converts model tool intent into OpenAI tool_calls", async () => {
   const { config } = await fixtureConfig();
   await switchProfile(config, "claude-sonnet");
