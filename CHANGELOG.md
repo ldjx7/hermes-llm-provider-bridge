@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.1] - 2026-06-24
+
+### Added
+
+- Anthropic-compatible `POST /v1/messages`.
+- Anthropic `tool_use` content blocks for tool intent.
+- Basic Anthropic Messages SSE support for `stream: true`.
+
 ## [0.1.0] - 2026-06-23
 
 ### Added

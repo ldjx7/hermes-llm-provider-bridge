@@ -13,10 +13,10 @@ Hermes request
   -> http://127.0.0.1:18777/v1
   -> bridge reads Claude Code settings from /profiles/claude-max/settings.json
   -> bridge sends a structured prompt to claude --model <requested-model>
-  -> bridge returns OpenAI-compatible chat completion or response
+  -> bridge returns OpenAI-compatible or Anthropic-compatible output
 ```
 
-For tool use, the bridge does not execute tools. It asks the backend model to return structured JSON tool intent, validates it against the current Hermes `tools` list, and returns OpenAI `tool_calls` or Responses `function_call` output items so Hermes can execute its own tools.
+For tool use, the bridge does not execute tools. It asks the backend model to return structured JSON tool intent, validates it against the current Hermes `tools` list, and returns OpenAI `tool_calls`, Responses `function_call` output items, or Anthropic `tool_use` blocks so Hermes can execute its own tools.
 
 The bridge serializes provider calls by default (`maxConcurrentRequests: 1`). This avoids multiple expensive CLI processes racing each other and keeps global profile switching predictable.
 
@@ -30,6 +30,7 @@ POST /v1/responses
 GET  /v1/responses/{response_id}
 DELETE /v1/responses/{response_id}
 GET  /v1/responses/{response_id}/input_items
+POST /v1/messages
 
 GET  /admin/profiles
 GET  /admin/active
@@ -65,7 +66,7 @@ Hermes provider settings:
 ```text
 API base URL: http://127.0.0.1:18777/v1
 API key: test
-API mode: Chat Completions or Responses
+API mode: Auto-detect, Chat Completions, Responses / Codex, or Anthropic Messages
 Model: claude-sonnet-4-6
 ```
 
@@ -137,6 +138,22 @@ Text output is returned as a Responses `message` item with `output_text` content
 
 The bridge stores responses in memory when `store` is not `false`, so they can be read or deleted through `GET /v1/responses/{response_id}` and `DELETE /v1/responses/{response_id}` while the bridge process is running. Stored response inputs can be listed with `GET /v1/responses/{response_id}/input_items`. `stream: true` returns a basic Responses server-sent event stream.
 
+## Anthropic Messages API
+
+`POST /v1/messages` accepts the same listed model ids. This is a compatibility shim for clients that select Anthropic Messages mode:
+
+```bash
+curl -s http://127.0.0.1:18777/v1/messages \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "claude-sonnet-4-6",
+    "messages": [{"role": "user", "content": "请只回复一句中文：测试成功"}],
+    "max_tokens": 128
+  }'
+```
+
+Text output is returned as Anthropic `text` content blocks. Tool intent is returned as `tool_use` content blocks with `stop_reason: "tool_use"`; the bridge still does not execute tools.
+
 ## Docker
 
 Build:
@@ -149,7 +166,7 @@ Published images are available from GitHub Container Registry after tagged relea
 
 ```bash
 docker pull ghcr.io/ldjx7/hermes-bridge:latest
-docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.0
+docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.1
 ```
 
 Docker images are published only when a pushed tag points to a commit reachable from `main`. Each release publishes both the pushed tag and `latest`.
@@ -230,7 +247,7 @@ The CLI backend must print JSON that looks like one of these:
 
 If the backend prints invalid JSON, `repairRetries` controls how many times the bridge retries with a repair prompt. Set it to `0` to fail immediately.
 
-`POST /v1/chat/completions` and `POST /v1/responses` support both normal JSON responses and basic OpenAI-compatible SSE when the request includes `"stream": true`.
+`POST /v1/chat/completions`, `POST /v1/responses`, and `POST /v1/messages` support both normal JSON responses and basic SSE when the request includes `"stream": true`.
 
 ## Test
 

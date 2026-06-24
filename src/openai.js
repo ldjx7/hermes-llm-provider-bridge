@@ -78,6 +78,50 @@ export function chatCompletionResponse(request, modelResult) {
   return base;
 }
 
+export function anthropicProviderRequest(request) {
+  return {
+    ...request,
+    messages: anthropicMessages(request),
+    tools: normalizeAnthropicTools(request.tools || []),
+    tool_choice: anthropicToolChoice(request.tool_choice)
+  };
+}
+
+export function anthropicMessageResponse(request, modelResult) {
+  const normalized = normalizeModelResult(modelResult);
+  const response = {
+    id: `msg_${crypto.randomUUID().replaceAll("-", "")}`,
+    type: "message",
+    role: "assistant",
+    model: request.model,
+    content: [],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0
+    }
+  };
+
+  if (normalized.type === "final") {
+    response.content.push({ type: "text", text: normalized.content || "" });
+    return response;
+  }
+
+  response.stop_reason = "tool_use";
+  response.content.push(...validateToolCalls({
+    ...request,
+    tools: normalizeAnthropicTools(request.tools || []),
+    tool_choice: anthropicToolChoice(request.tool_choice)
+  }, normalized.tool_calls || []).map((call) => ({
+    type: "tool_use",
+    id: `toolu_${crypto.randomUUID().replaceAll("-", "")}`,
+    name: call.name,
+    input: call.arguments
+  })));
+  return response;
+}
+
 export function responseProviderRequest(request) {
   return {
     ...request,
@@ -268,6 +312,78 @@ export function streamResponseObject(response) {
   return events.join("");
 }
 
+export function streamAnthropicMessage(message) {
+  const startMessage = {
+    ...message,
+    content: [],
+    stop_reason: null
+  };
+  const events = [
+    sseEvent("message_start", {
+      type: "message_start",
+      message: startMessage
+    })
+  ];
+
+  for (const [index, block] of message.content.entries()) {
+    if (block.type === "text") {
+      events.push(sseEvent("content_block_start", {
+        type: "content_block_start",
+        index,
+        content_block: { type: "text", text: "" }
+      }));
+      events.push(sseEvent("content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: { type: "text_delta", text: block.text || "" }
+      }));
+      events.push(sseEvent("content_block_stop", {
+        type: "content_block_stop",
+        index
+      }));
+      continue;
+    }
+
+    if (block.type === "tool_use") {
+      events.push(sseEvent("content_block_start", {
+        type: "content_block_start",
+        index,
+        content_block: {
+          type: "tool_use",
+          id: block.id,
+          name: block.name,
+          input: {}
+        }
+      }));
+      events.push(sseEvent("content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: {
+          type: "input_json_delta",
+          partial_json: JSON.stringify(block.input || {})
+        }
+      }));
+      events.push(sseEvent("content_block_stop", {
+        type: "content_block_stop",
+        index
+      }));
+    }
+  }
+
+  events.push(sseEvent("message_delta", {
+    type: "message_delta",
+    delta: {
+      stop_reason: message.stop_reason,
+      stop_sequence: message.stop_sequence
+    },
+    usage: {
+      output_tokens: 0
+    }
+  }));
+  events.push(sseEvent("message_stop", { type: "message_stop" }));
+  return events.join("");
+}
+
 function sse(value) {
   return `data: ${JSON.stringify(value)}\n\n`;
 }
@@ -358,6 +474,38 @@ function responseInputMessages(request) {
   }
 
   return messages;
+}
+
+function anthropicMessages(request) {
+  const messages = [];
+  if (request.system) {
+    messages.push({ role: "system", content: contentText(request.system) });
+  }
+
+  for (const message of request.messages || []) {
+    messages.push({
+      role: message.role,
+      content: contentText(message.content)
+    });
+  }
+
+  return messages;
+}
+
+function normalizeAnthropicTools(tools) {
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.input_schema || {}
+    }
+  }));
+}
+
+function anthropicToolChoice(toolChoice) {
+  if (toolChoice?.type === "none") return "none";
+  return "auto";
 }
 
 function messageInputItem(role, content, id = `msg_${crypto.randomUUID().replaceAll("-", "")}`) {

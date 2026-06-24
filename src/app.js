@@ -2,6 +2,8 @@ import { getActiveProfile, listExposedModels, listProfiles, switchProfile, resol
 import { errorBody, HttpError } from "./errors.js";
 import { runProvider } from "./adapters.js";
 import {
+  anthropicMessageResponse,
+  anthropicProviderRequest,
   chatCompletionResponse,
   modelResponse,
   modelsResponse,
@@ -9,6 +11,7 @@ import {
   responseInputItems,
   responseObject,
   responseProviderRequest,
+  streamAnthropicMessage,
   streamChatCompletionResponse,
   streamResponseObject
 } from "./openai.js";
@@ -90,6 +93,10 @@ async function handleRequest(config, limitProviderRequest, responseStore, reques
       return await limitProviderRequest(() => chatCompletions(config, body));
     }
 
+    if (request.method === "POST" && url.pathname === "/v1/messages") {
+      return await limitProviderRequest(() => anthropicMessages(config, body));
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/responses") {
       return await limitProviderRequest(() => responsesCreate(config, responseStore, body));
     }
@@ -160,6 +167,40 @@ async function chatCompletions(config, body) {
   const response = chatCompletionResponse({ ...body, model: model.id }, providerResult);
   if (body.stream) {
     return eventStream(200, streamChatCompletionResponse(response));
+  }
+  return json(200, response);
+}
+
+async function anthropicMessages(config, body) {
+  if (!body || typeof body !== "object") {
+    throw new HttpError(400, "Request body must be a JSON object", "bad_request");
+  }
+  if (!body.model || typeof body.model !== "string") {
+    throw new HttpError(400, "Request body must include model", "bad_request");
+  }
+  if (!Array.isArray(body.messages)) {
+    throw new HttpError(400, "Request body must include messages", "bad_request");
+  }
+
+  const { profileName, profile, model } = await resolveModelRoute(config, body.model);
+  if (!model) {
+    throw new HttpError(400, `Profile "${profileName}" has no models`, "bad_config");
+  }
+  if (model.id !== body.model) {
+    throw new HttpError(400, `Model "${body.model}" is not available`, "bad_request");
+  }
+
+  const providerRequest = anthropicProviderRequest({ ...body, model: model.id });
+  const providerResult = await runProvider({
+    config,
+    profileName,
+    profile,
+    model,
+    request: providerRequest
+  });
+  const response = anthropicMessageResponse({ ...body, model: model.id }, providerResult);
+  if (body.stream) {
+    return eventStream(200, streamAnthropicMessage(response));
   }
   return json(200, response);
 }

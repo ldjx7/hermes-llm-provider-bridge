@@ -446,6 +446,98 @@ test("responses can return SSE for stream requests", async () => {
   assert.match(response.body, /data: \[DONE\]/);
 });
 
+test("anthropic messages returns an Anthropic-compatible message", async () => {
+  const { config, callsFile } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "claude-opus-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/messages", {
+    model: "claude-opus-4-6",
+    system: "Reply briefly.",
+    messages: [{ role: "user", content: "hello" }],
+    max_tokens: 128
+  });
+
+  assert.equal(response.status, 200);
+  assert.match(response.body.id, /^msg_/);
+  assert.equal(response.body.type, "message");
+  assert.equal(response.body.role, "assistant");
+  assert.equal(response.body.model, "claude-opus-4-6");
+  assert.deepEqual(response.body.content, [{ type: "text", text: "settings response" }]);
+  assert.equal(response.body.stop_reason, "end_turn");
+  assert.equal(response.body.stop_sequence, null);
+  assert.deepEqual(response.body.usage, { input_tokens: 0, output_tokens: 0 });
+
+  const calls = await readFile(callsFile, "utf8");
+  assert.match(calls, /"backendModel":"claude-opus-4-6"/);
+  assert.match(calls, /"role":"system","content":"Reply briefly\."/);
+  assert.match(calls, /"role":"user","content":"hello"/);
+});
+
+test("anthropic messages returns tool_use blocks without executing tools", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "claude-opus-4-6"
+    }
+  });
+  config.claude.mockResponse = {
+    type: "tool_calls",
+    tool_calls: [
+      { name: "run_shell", arguments: { cmd: "pwd" } }
+    ]
+  };
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/messages", {
+    model: "claude-opus-4-6",
+    messages: [{ role: "user", content: "where am I?" }],
+    max_tokens: 128,
+    tools: [
+      {
+        name: "run_shell",
+        input_schema: {
+          type: "object",
+          required: ["cmd"],
+          properties: { cmd: { type: "string" } }
+        }
+      }
+    ]
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.stop_reason, "tool_use");
+  assert.equal(response.body.content.length, 1);
+  assert.equal(response.body.content[0].type, "tool_use");
+  assert.match(response.body.content[0].id, /^toolu_/);
+  assert.equal(response.body.content[0].name, "run_shell");
+  assert.deepEqual(response.body.content[0].input, { cmd: "pwd" });
+});
+
+test("anthropic messages can return SSE for stream requests", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "claude-opus-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/messages", {
+    model: "claude-opus-4-6",
+    stream: true,
+    messages: [{ role: "user", content: "hello" }],
+    max_tokens: 128
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["content-type"], "text/event-stream");
+  assert.match(response.body, /event: message_start/);
+  assert.match(response.body, /event: content_block_delta/);
+  assert.match(response.body, /event: message_stop/);
+});
+
 test("chat completions converts model tool intent into OpenAI tool_calls", async () => {
   const { config } = await fixtureConfig();
   await switchProfile(config, "claude-sonnet");
