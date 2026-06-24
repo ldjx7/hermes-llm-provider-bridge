@@ -8,7 +8,17 @@ const current = attemptsFile ? readAttempt(attemptsFile) : 0;
 const next = current + 1;
 if (attemptsFile) writeFileSync(attemptsFile, String(next));
 
-if (mode === "invalid-tool") {
+if (mode === "stdin-echo") {
+  const stdin = readFileSync(0, "utf8");
+  const marker = process.env.FAKE_CLI_MARKER || "";
+  process.stdout.write(JSON.stringify({
+    type: "final",
+    content: JSON.stringify({
+      markerInStdin: stdin.includes(marker),
+      markerInArgv: process.argv.slice(2).some((arg) => arg.includes(marker))
+    })
+  }));
+} else if (mode === "invalid-tool") {
   if (next === 1) {
     process.stdout.write(JSON.stringify({
       type: "tool_calls",

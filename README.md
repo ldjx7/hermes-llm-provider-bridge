@@ -178,7 +178,7 @@ Published images are available from GitHub Container Registry after tagged relea
 
 ```bash
 docker pull ghcr.io/ldjx7/hermes-bridge:latest
-docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.1
+docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.6
 ```
 
 Docker images are published only when a pushed tag points to a commit reachable from `main`. Each release publishes both the pushed tag and `latest`.
@@ -241,10 +241,13 @@ The default config reads model names from mounted Claude Code settings and passe
     "configDir": "/profiles/claude-max",
     "repairRetries": 1,
     "command": "claude",
-    "args": ["--model", "{{backendModel}}", "--print", "{{prompt}}", "--output-format", "json"]
+    "args": ["--model", "{{backendModel}}", "--print", "--output-format", "json", "--no-session-persistence"],
+    "stdin": "{{prompt}}"
   }
 }
 ```
+
+The default Claude Code profile passes the generated bridge prompt through stdin instead of a command-line argument. This avoids OS argv size limits such as `spawn E2BIG` when Hermes includes large browser, search, or file tool results in context. The bridge rejects stdin payloads above `maxStdinBytes` before spawning the provider command; the default is `10485760` bytes, matching Claude Code's documented 10 MB piped stdin limit.
 
 Profile-based routing is still supported for advanced custom configs, but it is no longer the default Docker path.
 

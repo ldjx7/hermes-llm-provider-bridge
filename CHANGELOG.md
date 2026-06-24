@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.6] - 2026-06-24
+
+### Fixed
+
+- Pass default Claude Code prompts through stdin instead of argv to avoid `spawn E2BIG` when requests include large tool results or conversation context.
+- Return `413 provider_input_too_large` when configured stdin input exceeds the bridge limit before starting the provider command.
+
 ## [0.1.5] - 2026-06-24
 
 ### Added

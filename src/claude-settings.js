@@ -54,11 +54,11 @@ export function claudeProviderConfig(config) {
       "--model",
       "{{backendModel}}",
       "--print",
-      "{{prompt}}",
       "--output-format",
       "json",
       "--no-session-persistence"
     ],
+    stdin: "{{prompt}}",
     ...(config.claude || {})
   };
 }

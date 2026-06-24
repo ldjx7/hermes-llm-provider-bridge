@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createApp } from "../src/app.js";
+import { claudeProviderConfig } from "../src/claude-settings.js";
 import { switchProfile, getActiveProfileName } from "../src/config-store.js";
 import { normalizeCliResult } from "../src/openai.js";
 import { probeActiveProfile } from "../src/probe.js";
@@ -122,6 +123,13 @@ test("models endpoint can derive available models from Claude settings", async (
   assert.deepEqual(response.body.data.map((model) => model.id), ["claude-sonnet-4-6"]);
   assert.equal(response.body.data[0].object, "model");
   assert.equal(response.body.data[0].owned_by, "claude-code");
+});
+
+test("default Claude settings provider sends prompts through stdin", () => {
+  const provider = claudeProviderConfig({});
+
+  assert.equal(provider.stdin, "{{prompt}}");
+  assert.ok(!provider.args.includes("{{prompt}}"));
 });
 
 test("models endpoint can retrieve a single listed model", async () => {
@@ -793,6 +801,71 @@ test("cli-json retries once with a repair prompt when provider JSON is invalid",
   assert.equal(response.status, 200);
   assert.equal(response.body.choices[0].message.content, "repaired");
   assert.equal(await readFile(attemptsFile, "utf8"), "2");
+});
+
+test("cli-json can pass prompt through stdin instead of argv", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "hermes-bridge-cli-stdin-"));
+  const marker = `stdin-marker-${"x".repeat(10000)}`;
+  const config = {
+    stateFile: path.join(dir, "state.json"),
+    defaultProfile: "stdin-cli",
+    profiles: {
+      "stdin-cli": {
+        provider: "cli-json",
+        command: process.execPath,
+        args: [path.resolve("fixtures/fake-cli.js")],
+        stdin: "{{prompt}}",
+        env: {
+          FAKE_CLI_MODE: "stdin-echo",
+          FAKE_CLI_MARKER: marker
+        },
+        repairRetries: 0,
+        models: [{ id: "hermes-bridge", backendModel: "fake" }]
+      }
+    }
+  };
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    model: "hermes-bridge",
+    messages: [{ role: "user", content: marker }]
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(response.body.choices[0].message.content), {
+    markerInStdin: true,
+    markerInArgv: false
+  });
+});
+
+test("cli-json rejects stdin prompts that exceed the configured stdin limit", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "hermes-bridge-cli-stdin-limit-"));
+  const config = {
+    stateFile: path.join(dir, "state.json"),
+    defaultProfile: "stdin-cli",
+    profiles: {
+      "stdin-cli": {
+        provider: "cli-json",
+        command: process.execPath,
+        args: [path.resolve("fixtures/fake-cli.js")],
+        stdin: "{{prompt}}",
+        maxStdinBytes: 64,
+        env: { FAKE_CLI_MODE: "stdin-echo" },
+        repairRetries: 0,
+        models: [{ id: "hermes-bridge", backendModel: "fake" }]
+      }
+    }
+  };
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    model: "hermes-bridge",
+    messages: [{ role: "user", content: "this prompt is intentionally too large for the tiny test limit" }]
+  });
+
+  assert.equal(response.status, 413);
+  assert.equal(response.body.error.type, "provider_input_too_large");
+  assert.match(response.body.error.message, /stdin input exceeds/);
 });
 
 test("cli-json repairs tool calls that are not in the Hermes tool list", async () => {
