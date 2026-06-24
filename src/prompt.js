@@ -25,16 +25,21 @@ export function buildStructuredPrompt(request, context) {
   ].join("\n");
 }
 
-export function buildRepairPrompt({ originalPrompt, badOutput, errorMessage }) {
+export function buildRepairPrompt({ originalPrompt, badOutput, errorMessage, availableTools = [] }) {
   return [
-    "The previous response was not valid bridge JSON.",
-    `Parser error: ${errorMessage}`,
+    "The previous response did not satisfy the bridge output requirements.",
+    `Bridge validation error: ${errorMessage}`,
     "",
     "Rewrite the response as exactly one JSON object and no surrounding Markdown.",
     "Allowed final answer shape:",
     "{\"type\":\"final\",\"content\":\"text\"}",
     "Allowed tool call shape:",
     "{\"type\":\"tool_calls\",\"tool_calls\":[{\"name\":\"tool_name\",\"arguments\":{\"key\":\"value\"}}]}",
+    "",
+    availableTools.length > 0
+      ? `Available tool names for this request: ${availableTools.join(", ")}`
+      : "No tools are available for this request.",
+    "Do not invent tool names. If none of the available tools fit the task, return a final answer instead.",
     "",
     "Original bridge instructions:",
     originalPrompt,

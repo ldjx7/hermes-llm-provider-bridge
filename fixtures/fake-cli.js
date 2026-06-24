@@ -2,11 +2,26 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 const attemptsFile = process.env.FAKE_CLI_ATTEMPTS_FILE;
+const mode = process.env.FAKE_CLI_MODE || "invalid-json";
+const prompt = process.argv[2] || "";
 const current = attemptsFile ? readAttempt(attemptsFile) : 0;
 const next = current + 1;
 if (attemptsFile) writeFileSync(attemptsFile, String(next));
 
-if (next === 1) {
+if (mode === "invalid-tool") {
+  if (next === 1) {
+    process.stdout.write(JSON.stringify({
+      type: "tool_calls",
+      tool_calls: [
+        { name: "web_search", arguments: { query: "cs2 major winner" } }
+      ]
+    }));
+  } else if (prompt.includes("web_search") && prompt.includes("run_shell")) {
+    process.stdout.write(JSON.stringify({ type: "final", content: "repaired tool intent" }));
+  } else {
+    process.stdout.write(JSON.stringify({ type: "final", content: "missing repair context" }));
+  }
+} else if (next === 1) {
   process.stdout.write("this is not json");
 } else {
   process.stdout.write(JSON.stringify({

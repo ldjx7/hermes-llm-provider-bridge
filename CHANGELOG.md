@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.4] - 2026-06-24
+
+### Fixed
+
+- Retry CLI provider output repair when the provider requests a tool that Hermes did not advertise in the current request.
+- Include the current request's available tool names in repair prompts so the provider can choose a valid tool or return a final answer.
+
 ## [0.1.3] - 2026-06-24
 
 ### Fixed

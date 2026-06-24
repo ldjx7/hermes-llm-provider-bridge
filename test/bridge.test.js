@@ -763,6 +763,52 @@ test("cli-json retries once with a repair prompt when provider JSON is invalid",
   assert.equal(await readFile(attemptsFile, "utf8"), "2");
 });
 
+test("cli-json repairs tool calls that are not in the Hermes tool list", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "hermes-bridge-cli-tool-"));
+  const attemptsFile = path.join(dir, "attempts.txt");
+  const config = {
+    stateFile: path.join(dir, "state.json"),
+    defaultProfile: "repairing-cli",
+    profiles: {
+      "repairing-cli": {
+        provider: "cli-json",
+        command: process.execPath,
+        args: [path.resolve("fixtures/fake-cli.js"), "{{prompt}}"],
+        env: {
+          FAKE_CLI_ATTEMPTS_FILE: attemptsFile,
+          FAKE_CLI_MODE: "invalid-tool"
+        },
+        repairRetries: 1,
+        models: [{ id: "hermes-bridge", backendModel: "fake" }]
+      }
+    }
+  };
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    model: "hermes-bridge",
+    messages: [{ role: "user", content: "who won the latest CS2 major?" }],
+    tools: [{
+      type: "function",
+      function: {
+        name: "run_shell",
+        description: "Run a shell command",
+        parameters: {
+          type: "object",
+          properties: {
+            cmd: { type: "string" }
+          },
+          required: ["cmd"]
+        }
+      }
+    }]
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.choices[0].message.content, "repaired tool intent");
+  assert.equal(await readFile(attemptsFile, "utf8"), "2");
+});
+
 test("provider requests are serialized by the global request queue", async () => {
   const { config } = await fixtureConfig();
   config.maxConcurrentRequests = 1;

@@ -31,6 +31,14 @@ export function normalizeCliResult(stdout) {
   return parsed;
 }
 
+export function validateProviderResult(request, modelResult) {
+  const normalized = normalizeModelResult(modelResult);
+  if (normalized.type === "tool_calls") {
+    validateToolCalls(request, normalized.tool_calls || []);
+  }
+  return normalized;
+}
+
 export function chatCompletionResponse(request, modelResult) {
   const normalized = normalizeModelResult(modelResult);
   const base = {

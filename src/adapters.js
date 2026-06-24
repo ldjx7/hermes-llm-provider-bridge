@@ -2,7 +2,7 @@ import { appendFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
 import { HttpError } from "./errors.js";
-import { normalizeCliResult } from "./openai.js";
+import { normalizeCliResult, validateProviderResult } from "./openai.js";
 import { buildRepairPrompt, buildStructuredPrompt } from "./prompt.js";
 
 export async function runProvider({ config, profileName, profile, model, request }) {
@@ -21,13 +21,13 @@ export async function runProvider({ config, profileName, profile, model, request
 
   if (profile.provider === "cli-json") {
     const prompt = buildStructuredPrompt(request, { profileName, profile, model });
-    return await runCliJsonWithRepair(profile, model, prompt);
+    return await runCliJsonWithRepair(profile, model, prompt, request);
   }
 
   throw new HttpError(400, `Unsupported profile provider "${profile.provider}"`, "bad_config");
 }
 
-async function runCliJsonWithRepair(profile, model, prompt) {
+async function runCliJsonWithRepair(profile, model, prompt, request) {
   const maxAttempts = 1 + Math.max(0, Number(profile.repairRetries ?? 1) || 0);
   let currentPrompt = prompt;
   let lastStdout = "";
@@ -35,20 +35,29 @@ async function runCliJsonWithRepair(profile, model, prompt) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     lastStdout = await runCli(profile, model, currentPrompt);
+    let result;
     try {
-      return normalizeCliResult(lastStdout);
+      result = normalizeCliResult(lastStdout);
+      return validateProviderResult(request, result);
     } catch (error) {
       lastError = error;
       if (attempt >= maxAttempts) break;
       currentPrompt = buildRepairPrompt({
         originalPrompt: prompt,
-        badOutput: lastStdout,
-        errorMessage: error.message
+        badOutput: result ? JSON.stringify(result) : lastStdout,
+        errorMessage: error.message,
+        availableTools: toolNames(request)
       });
     }
   }
 
   throw lastError || new HttpError(502, "Provider returned invalid JSON", "bad_provider_result");
+}
+
+function toolNames(request) {
+  return (request.tools || [])
+    .filter((tool) => tool?.type === "function" && tool.function?.name)
+    .map((tool) => tool.function.name);
 }
 
 async function recordTestCall(config, call) {
