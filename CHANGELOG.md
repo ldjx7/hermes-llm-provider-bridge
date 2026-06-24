@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.2] - 2026-06-24
+
+### Fixed
+
+- Preserve Anthropic Messages content blocks such as `tool_use` and `tool_result` when building backend context.
+- Prevent Hermes tool results from being dropped before they reach the backend model.
+
 ## [0.1.1] - 2026-06-24
 
 ### Added

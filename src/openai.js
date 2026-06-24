@@ -548,13 +548,35 @@ function contentText(content) {
   if (content === undefined || content === null) return "";
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return content.map((part) => {
-      if (typeof part === "string") return part;
-      if (typeof part?.text === "string") return part.text;
-      return "";
-    }).filter(Boolean).join("\n");
+    return content.map(contentBlockText).filter(Boolean).join("\n");
   }
   return JSON.stringify(content);
+}
+
+function contentBlockText(part) {
+  if (typeof part === "string") return part;
+  if (!part || typeof part !== "object") return "";
+  if (typeof part.text === "string") return part.text;
+  if (part.type === "tool_use") {
+    return JSON.stringify({
+      type: part.type,
+      id: part.id,
+      name: part.name,
+      input: part.input
+    });
+  }
+  if (part.type === "tool_result") {
+    return JSON.stringify({
+      type: part.type,
+      tool_use_id: part.tool_use_id,
+      content: contentText(part.content),
+      is_error: part.is_error || false
+    });
+  }
+  if (part.type === "image" || part.type === "document") {
+    return JSON.stringify(part);
+  }
+  return JSON.stringify(part);
 }
 
 function normalizeArguments(argumentsValue) {

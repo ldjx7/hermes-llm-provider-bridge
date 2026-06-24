@@ -516,6 +516,60 @@ test("anthropic messages returns tool_use blocks without executing tools", async
   assert.deepEqual(response.body.content[0].input, { cmd: "pwd" });
 });
 
+test("anthropic messages preserves tool result content for the backend model", async () => {
+  const { config, callsFile } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "claude-opus-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/messages", {
+    model: "claude-opus-4-6",
+    messages: [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_search",
+            name: "web_search",
+            input: { query: "CS2 latest major champion" }
+          }
+        ]
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu_search",
+            content: "BLAST.tv Austin Major 2025 champion: Vitality"
+          }
+        ]
+      }
+    ],
+    max_tokens: 128,
+    tools: [
+      {
+        name: "web_search",
+        input_schema: {
+          type: "object",
+          required: ["query"],
+          properties: { query: { type: "string" } }
+        }
+      }
+    ]
+  });
+
+  assert.equal(response.status, 200);
+
+  const calls = await readFile(callsFile, "utf8");
+  assert.match(calls, /CS2 latest major champion/);
+  assert.match(calls, /BLAST\.tv Austin Major 2025 champion: Vitality/);
+  assert.match(calls, /toolu_search/);
+});
+
 test("anthropic messages can return SSE for stream requests", async () => {
   const { config } = await fixtureClaudeSettingsConfig({
     env: {
