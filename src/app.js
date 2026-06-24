@@ -224,7 +224,8 @@ async function responsesCreate(config, responseStore, body) {
     throw new HttpError(400, `Model "${body.model}" is not available`, "bad_request");
   }
 
-  const providerRequest = responseProviderRequest({ ...body, model: model.id });
+  const previousRecords = previousResponseRecords(responseStore, body.previous_response_id);
+  const providerRequest = responseProviderRequest({ ...body, model: model.id }, previousRecords);
   const providerResult = await runProvider({
     config,
     profileName,
@@ -236,7 +237,8 @@ async function responsesCreate(config, responseStore, body) {
   if (response.store) {
     responseStore.set(response.id, {
       response,
-      inputItems: responseInputItems(body.input)
+      inputItems: responseInputItems(body.input),
+      previousResponseId: body.previous_response_id || null
     });
   }
   if (body.stream) {
@@ -255,6 +257,25 @@ function storedResponseRecord(responseStore, responseId) {
     throw new HttpError(404, `Response "${responseId}" not found`, "not_found");
   }
   return record;
+}
+
+function previousResponseRecords(responseStore, responseId) {
+  if (!responseId) return [];
+  const records = [];
+  const seen = new Set();
+  let currentId = responseId;
+
+  while (currentId) {
+    if (seen.has(currentId)) {
+      throw new HttpError(400, `Circular previous_response_id chain at "${currentId}"`, "bad_request");
+    }
+    seen.add(currentId);
+    const record = storedResponseRecord(responseStore, currentId);
+    records.unshift(record);
+    currentId = record.previousResponseId;
+  }
+
+  return records;
 }
 
 function parseBody(request) {

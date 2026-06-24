@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.3] - 2026-06-24
+
+### Fixed
+
+- Include stored Responses input/output history when `previous_response_id` is used.
+- Treat object-form `tool_choice: { "type": "none" }` as disabled tool use.
+
 ## [0.1.2] - 2026-06-24
 
 ### Fixed

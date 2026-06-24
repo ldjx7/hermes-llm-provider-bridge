@@ -122,10 +122,13 @@ export function anthropicMessageResponse(request, modelResult) {
   return response;
 }
 
-export function responseProviderRequest(request) {
+export function responseProviderRequest(request, previousRecords = []) {
   return {
     ...request,
-    messages: responseInputMessages(request),
+    messages: [
+      ...previousRecords.flatMap(responseRecordMessages),
+      ...responseInputMessages(request)
+    ],
     tools: normalizeResponseTools(request.tools || []),
     tool_choice: request.tool_choice || "auto"
   };
@@ -406,7 +409,7 @@ function normalizeModelResult(modelResult) {
 }
 
 function validateToolCalls(request, toolCalls) {
-  if (request.tool_choice === "none") {
+  if (isToolChoiceNone(request.tool_choice)) {
     throw new HttpError(502, "Provider returned tool calls while tool_choice is none", "invalid_tool_call");
   }
   if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
@@ -432,17 +435,20 @@ function responseInputMessages(request) {
   if (request.instructions) {
     messages.push({ role: "system", content: contentText(request.instructions) });
   }
+  messages.push(...responseInputItemMessages(responseInputItems(request.input)));
+  return messages;
+}
 
-  if (typeof request.input === "string") {
-    messages.push({ role: "user", content: request.input });
-    return messages;
-  }
+function responseRecordMessages(record) {
+  return [
+    ...responseInputItemMessages(record.inputItems || []),
+    ...responseOutputMessages(record.response?.output || [])
+  ];
+}
 
-  if (!Array.isArray(request.input)) {
-    return messages;
-  }
-
-  for (const item of request.input) {
+function responseInputItemMessages(items) {
+  const messages = [];
+  for (const item of items || []) {
     if (item?.type === "function_call_output") {
       messages.push({
         role: "tool",
@@ -476,6 +482,32 @@ function responseInputMessages(request) {
   return messages;
 }
 
+function responseOutputMessages(output) {
+  const messages = [];
+  for (const item of output || []) {
+    if (item?.type === "message") {
+      messages.push({
+        role: item.role || "assistant",
+        content: contentText(item.content)
+      });
+      continue;
+    }
+
+    if (item?.type === "function_call") {
+      messages.push({
+        role: "assistant",
+        content: JSON.stringify({
+          type: item.type,
+          call_id: item.call_id,
+          name: item.name,
+          arguments: item.arguments
+        })
+      });
+    }
+  }
+  return messages;
+}
+
 function anthropicMessages(request) {
   const messages = [];
   if (request.system) {
@@ -506,6 +538,10 @@ function normalizeAnthropicTools(tools) {
 function anthropicToolChoice(toolChoice) {
   if (toolChoice?.type === "none") return "none";
   return "auto";
+}
+
+function isToolChoiceNone(toolChoice) {
+  return toolChoice === "none" || toolChoice?.type === "none";
 }
 
 function messageInputItem(role, content, id = `msg_${crypto.randomUUID().replaceAll("-", "")}`) {

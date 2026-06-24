@@ -424,6 +424,77 @@ test("responses can list stored input items", async () => {
   assert.equal(response.body.has_more, false);
 });
 
+test("responses include previous_response_id context for the backend model", async () => {
+  const { config, callsFile } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  const app = createApp({ config });
+
+  const first = await request(app, "POST", "/v1/responses", {
+    model: "claude-sonnet-4-6",
+    input: "我的名字是梁杰"
+  });
+
+  const second = await request(app, "POST", "/v1/responses", {
+    model: "claude-sonnet-4-6",
+    previous_response_id: first.body.id,
+    input: "我叫什么？"
+  });
+
+  assert.equal(second.status, 200);
+
+  const calls = (await readFile(callsFile, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].messages.map((message) => message.role), [
+    "user",
+    "assistant",
+    "user"
+  ]);
+  assert.equal(calls[1].messages[0].content, "我的名字是梁杰");
+  assert.equal(calls[1].messages[1].content, "settings response");
+  assert.equal(calls[1].messages[2].content, "我叫什么？");
+});
+
+test("responses rejects tool calls when object tool_choice is none", async () => {
+  const { config } = await fixtureClaudeSettingsConfig({
+    env: {
+      ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: "claude-sonnet-4-6"
+    }
+  });
+  config.claude.mockResponse = {
+    type: "tool_calls",
+    tool_calls: [
+      { name: "run_shell", arguments: { cmd: "pwd" } }
+    ]
+  };
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/responses", {
+    model: "claude-sonnet-4-6",
+    input: "hello",
+    tool_choice: { type: "none" },
+    tools: [
+      {
+        type: "function",
+        name: "run_shell",
+        parameters: {
+          type: "object",
+          required: ["cmd"],
+          properties: { cmd: { type: "string" } }
+        }
+      }
+    ]
+  });
+
+  assert.equal(response.status, 502);
+  assert.match(response.body.error.message, /tool_choice is none/);
+});
+
 test("responses can return SSE for stream requests", async () => {
   const { config } = await fixtureClaudeSettingsConfig({
     env: {
