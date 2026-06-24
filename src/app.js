@@ -54,6 +54,15 @@ export function createApp({ config }) {
 async function handleRequest(config, limitProviderRequest, responseStore, request) {
   try {
     const url = new URL(request.url, "http://127.0.0.1");
+
+    if (url.pathname.startsWith("/v1/")) {
+      assertProviderAuthorized(config, request);
+    }
+
+    if (url.pathname.startsWith("/admin/")) {
+      assertAdminAuthorized(config, request);
+    }
+
     const body = parseBody(request);
 
     if (request.method === "GET" && url.pathname === "/v1/models") {
@@ -67,10 +76,6 @@ async function handleRequest(config, limitProviderRequest, responseStore, reques
         throw new HttpError(404, `Model "${requestedModel}" not found`, "not_found");
       }
       return json(200, modelResponse(model));
-    }
-
-    if (url.pathname.startsWith("/admin/")) {
-      assertAdminAuthorized(config, request);
     }
 
     if (request.method === "GET" && url.pathname === "/admin/profiles") {
@@ -126,16 +131,54 @@ async function handleRequest(config, limitProviderRequest, responseStore, reques
   }
 }
 
+function assertProviderAuthorized(config, request) {
+  const expected = providerApiKeys(config);
+  if (expected.length === 0) return;
+
+  const token = requestApiKey(request);
+  if (token && expected.includes(token)) return;
+
+  throw new HttpError(401, "Unauthorized", "unauthorized");
+}
+
 function assertAdminAuthorized(config, request) {
   const expected = process.env.BRIDGE_ADMIN_TOKEN || config.adminToken;
   if (!expected) return;
 
-  const authorization = headerValue(request.headers, "authorization");
-  const bearer = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : undefined;
-  const token = bearer || headerValue(request.headers, "x-bridge-admin-token");
+  const token = bearerToken(request) || headerValue(request.headers, "x-bridge-admin-token");
   if (token === expected) return;
 
   throw new HttpError(401, "Unauthorized", "unauthorized");
+}
+
+function providerApiKeys(config) {
+  const fromEnv = splitKeys(process.env.BRIDGE_API_KEY);
+  const fromConfig = [
+    ...splitKeys(config.apiKey),
+    ...splitKeys(config.providerApiKey),
+    ...(Array.isArray(config.apiKeys) ? config.apiKeys : [])
+  ];
+  return [...fromEnv, ...fromConfig]
+    .map((key) => String(key || "").trim())
+    .filter(Boolean);
+}
+
+function requestApiKey(request) {
+  return bearerToken(request)
+    || headerValue(request.headers, "x-api-key")
+    || headerValue(request.headers, "api-key");
+}
+
+function bearerToken(request) {
+  const authorization = headerValue(request.headers, "authorization");
+  if (!authorization?.startsWith("Bearer ")) return undefined;
+  return authorization.slice("Bearer ".length);
+}
+
+function splitKeys(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  return String(value).split(",");
 }
 
 async function chatCompletions(config, body) {

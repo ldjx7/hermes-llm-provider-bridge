@@ -185,6 +185,38 @@ test("admin endpoints require bearer token when configured", async () => {
   assert.equal(response.body.profile, "claude-opus");
 });
 
+test("provider endpoints accept arbitrary API keys when no provider API key is configured", async () => {
+  const { config } = await fixtureConfig();
+  const app = createApp({ config });
+
+  const response = await request(app, "GET", "/v1/models", undefined, {
+    authorization: "Bearer sub2api-required-placeholder"
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.object, "list");
+});
+
+test("provider endpoints require the configured provider API key", async () => {
+  const { config } = await fixtureConfig();
+  config.apiKey = "provider-secret";
+  const app = createApp({ config });
+
+  let response = await request(app, "GET", "/v1/models");
+  assert.equal(response.status, 401);
+
+  response = await request(app, "GET", "/v1/models", undefined, {
+    authorization: "Bearer wrong"
+  });
+  assert.equal(response.status, 401);
+
+  response = await request(app, "GET", "/v1/models", undefined, {
+    authorization: "Bearer provider-secret"
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.object, "list");
+});
+
 test("chat completions uses active profile and returns final content", async () => {
   const { config, callsFile } = await fixtureConfig();
   const app = createApp({ config });

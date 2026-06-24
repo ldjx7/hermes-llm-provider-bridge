@@ -45,6 +45,16 @@ If `BRIDGE_ADMIN_TOKEN` or `adminToken` is configured, all `/admin/*` endpoints 
 Authorization: Bearer <token>
 ```
 
+Provider endpoints under `/v1/*` do not require an API key by default. This keeps local Hermes and Docker-network deployments simple. If an upstream gateway such as sub2api requires an API key field, you can enter any placeholder key and the bridge will accept it while no provider key is configured.
+
+To require a provider key, set `BRIDGE_API_KEY`, `apiKey`, `providerApiKey`, or `apiKeys` in config. When configured, `/v1/*` accepts:
+
+```text
+Authorization: Bearer <key>
+x-api-key: <key>
+api-key: <key>
+```
+
 CLI helpers:
 
 ```bash
@@ -69,6 +79,8 @@ API key: test
 API mode: Auto-detect, Chat Completions, Responses / Codex, or Anthropic Messages
 Model: claude-sonnet-4-6
 ```
+
+The `API key` value can be any placeholder unless you set `BRIDGE_API_KEY` or a provider API key in config.
 
 ## Model Routing
 
@@ -178,6 +190,7 @@ Run with mounted Claude profile data:
 ```bash
 docker run --rm -p 18777:18777 \
   -e BRIDGE_ADMIN_TOKEN="$(openssl rand -hex 24)" \
+  -e BRIDGE_API_KEY= \
   -v "$HOME/.claude:/profiles/claude-max" \
   ghcr.io/ldjx7/hermes-bridge:latest
 ```

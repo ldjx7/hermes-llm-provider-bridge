@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.5] - 2026-06-24
+
+### Added
+
+- Optional provider API key enforcement for `/v1/*` endpoints through `BRIDGE_API_KEY`, `apiKey`, `providerApiKey`, or `apiKeys`.
+- Compatibility for upstream gateways that require an API key field: when no provider API key is configured, arbitrary caller-supplied API keys are accepted.
+
 ## [0.1.4] - 2026-06-24
 
 ### Fixed
