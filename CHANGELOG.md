@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.9] - 2026-06-26
+
+### Added
+
+- Add an `openai-chat` profile provider for direct OpenAI-compatible `/v1/chat/completions` upstreams.
+- Allow OpenAI upstream credentials to be read from mounted `settings.json` values such as `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, or from explicit `baseUrl` and `apiKey` profile fields.
+
 ## [0.1.8] - 2026-06-26
 
 ### Fixed

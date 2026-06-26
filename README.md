@@ -1,6 +1,6 @@
 # Hermes LLM Provider Bridge
 
-OpenAI-compatible local provider bridge for Hermes. It exposes Claude Code CLI as a local `/v1` provider.
+OpenAI-compatible local provider bridge for Hermes. It exposes Claude Code CLI or OpenAI-compatible upstream chat models as a local `/v1` provider.
 
 This project is unofficial and is not affiliated with Anthropic, OpenAI, NousResearch, Hermes, or Codex.
 
@@ -13,6 +13,16 @@ Hermes request
   -> http://127.0.0.1:18777/v1
   -> bridge reads Claude Code settings from /profiles/claude-max/settings.json
   -> bridge sends a structured prompt to claude --model <requested-model>
+  -> bridge returns OpenAI-compatible or Anthropic-compatible output
+```
+
+For OpenAI-compatible upstream profiles, the flow is:
+
+```text
+Hermes request
+  -> http://127.0.0.1:18777/v1
+  -> bridge maps the requested model id to the upstream model id
+  -> bridge calls <baseUrl>/v1/chat/completions
   -> bridge returns OpenAI-compatible or Anthropic-compatible output
 ```
 
@@ -178,7 +188,7 @@ Published images are available from GitHub Container Registry after tagged relea
 
 ```bash
 docker pull ghcr.io/ldjx7/hermes-bridge:latest
-docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.6
+docker pull ghcr.io/ldjx7/hermes-bridge:v0.1.9
 ```
 
 Docker images are published only when a pushed tag points to a commit reachable from `main`. Each release publishes both the pushed tag and `latest`.
@@ -250,6 +260,53 @@ The default config reads model names from mounted Claude Code settings and passe
 The default Claude Code profile passes the generated bridge prompt through stdin instead of a command-line argument. This avoids OS argv size limits such as `spawn E2BIG` when Hermes includes large browser, search, or file tool results in context. The bridge rejects stdin payloads above `maxStdinBytes` before spawning the provider command; the default is `10485760` bytes, matching Claude Code's documented 10 MB piped stdin limit.
 
 Profile-based routing is still supported for advanced custom configs, but it is no longer the default Docker path.
+
+For an upstream that only supports OpenAI Chat Completions, use an `openai-chat` profile:
+
+```json
+{
+  "maxConcurrentRequests": 1,
+  "defaultProfile": "minimax",
+  "profiles": {
+    "minimax": {
+      "provider": "openai-chat",
+      "ownedBy": "minimax",
+      "configDir": "/profiles/claude-max",
+      "timeoutMs": 180000,
+      "models": [
+        {
+          "id": "claude-opus-4-6",
+          "backendModel": "MiniMax-M3"
+        }
+      ]
+    }
+  }
+}
+```
+
+In this mode, `id` is the model name exposed to Hermes and `backendModel` is the real upstream model sent to `/v1/chat/completions`. This lets Hermes keep using an existing model such as `claude-opus-4-6` while the bridge calls `MiniMax-M3`.
+
+The `openai-chat` provider reads upstream credentials from either explicit profile fields:
+
+```json
+{
+  "baseUrl": "https://api.example.com",
+  "apiKey": "..."
+}
+```
+
+or from the mounted `settings.json` under `configDir`:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.example.com",
+    "ANTHROPIC_AUTH_TOKEN": "..."
+  }
+}
+```
+
+`OPENAI_BASE_URL` and `OPENAI_API_KEY` are also supported in `settings.json`. Tool calls returned by the upstream are passed back to Hermes; the bridge does not execute them.
 
 The CLI backend must print JSON that looks like one of these:
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -85,6 +86,42 @@ async function request(app, method, pathname, body, headers = {}) {
 function parseResponseBody(body, headers) {
   if (headers?.["content-type"] === "text/event-stream") return body;
   return JSON.parse(body);
+}
+
+async function openAIUpstream(handler) {
+  const errors = [];
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      try {
+        const rawBody = Buffer.concat(chunks).toString();
+        const body = rawBody ? JSON.parse(rawBody) : undefined;
+        const result = handler({ req, body });
+        res.statusCode = result.status || 200;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(result.body));
+      } catch (error) {
+        errors.push(error);
+        res.statusCode = 500;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ error: { message: error.message } }));
+      }
+    });
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  return {
+    origin: `http://127.0.0.1:${port}`,
+    baseUrl: `http://127.0.0.1:${port}/v1`,
+    assertNoErrors() {
+      assert.deepEqual(errors, []);
+    },
+    close() {
+      return new Promise((resolve) => server.close(resolve));
+    }
+  };
 }
 
 test("models endpoint exposes the globally active profile", async () => {
@@ -270,6 +307,134 @@ test("chat completions can route directly to a named profile model", async () =>
 
   const calls = await readFile(callsFile, "utf8");
   assert.match(calls, /"profile":"claude-sonnet"/);
+});
+
+test("openai-chat provider calls an OpenAI-compatible upstream using settings credentials", async () => {
+  const upstream = await openAIUpstream(({ req, body }) => {
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/v1/chat/completions");
+    assert.equal(req.headers.authorization, "Bearer upstream-secret");
+    assert.equal(body.model, "MiniMax-M3");
+    assert.equal(body.messages[0].content, "hello");
+    return {
+      body: {
+        id: "chatcmpl-upstream",
+        object: "chat.completion",
+        choices: [{
+          index: 0,
+          message: { role: "assistant", content: "upstream ok" },
+          finish_reason: "stop"
+        }]
+      }
+    };
+  });
+
+  try {
+    const dir = await mkdtemp(path.join(tmpdir(), "hermes-bridge-openai-"));
+    const configDir = path.join(dir, "settings");
+    await mkdir(configDir, { recursive: true });
+    await writeFile(path.join(configDir, "settings.json"), JSON.stringify({
+      env: {
+        ANTHROPIC_BASE_URL: upstream.origin,
+        ANTHROPIC_AUTH_TOKEN: "upstream-secret"
+      }
+    }));
+    const app = createApp({
+      config: {
+        defaultProfile: "minimax",
+        profiles: {
+          minimax: {
+            provider: "openai-chat",
+            ownedBy: "minimax",
+            configDir,
+            models: [{ id: "claude-opus-4-6", backendModel: "MiniMax-M3" }]
+          }
+        }
+      }
+    });
+
+    const response = await request(app, "POST", "/v1/chat/completions", {
+      model: "claude-opus-4-6",
+      messages: [{ role: "user", content: "hello" }]
+    });
+
+    upstream.assertNoErrors();
+    assert.equal(response.status, 200);
+    assert.equal(response.body.model, "claude-opus-4-6");
+    assert.equal(response.body.choices[0].message.content, "upstream ok");
+  } finally {
+    await upstream.close();
+  }
+});
+
+test("openai-chat provider returns upstream tool calls without executing tools", async () => {
+  const upstream = await openAIUpstream(({ body }) => {
+    assert.equal(body.model, "MiniMax-M3");
+    assert.equal(body.tools[0].function.name, "run_shell");
+    return {
+      body: {
+        id: "chatcmpl-upstream-tool",
+        object: "chat.completion",
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [{
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "run_shell",
+                arguments: "{\"cmd\":\"pwd\"}"
+              }
+            }]
+          },
+          finish_reason: "tool_calls"
+        }]
+      }
+    };
+  });
+
+  try {
+    const app = createApp({
+      config: {
+        defaultProfile: "minimax",
+        profiles: {
+          minimax: {
+            provider: "openai-chat",
+            ownedBy: "minimax",
+            baseUrl: upstream.baseUrl,
+            apiKey: "direct-secret",
+            models: [{ id: "claude-opus-4-6", backendModel: "MiniMax-M3" }]
+          }
+        }
+      }
+    });
+
+    const response = await request(app, "POST", "/v1/chat/completions", {
+      model: "claude-opus-4-6",
+      messages: [{ role: "user", content: "where am I?" }],
+      tools: [{
+        type: "function",
+        function: {
+          name: "run_shell",
+          parameters: {
+            type: "object",
+            required: ["cmd"],
+            properties: { cmd: { type: "string" } }
+          }
+        }
+      }]
+    });
+
+    upstream.assertNoErrors();
+    assert.equal(response.status, 200);
+    assert.equal(response.body.choices[0].finish_reason, "tool_calls");
+    assert.equal(response.body.choices[0].message.tool_calls[0].function.name, "run_shell");
+    assert.equal(response.body.choices[0].message.tool_calls[0].function.arguments, "{\"cmd\":\"pwd\"}");
+  } finally {
+    await upstream.close();
+  }
 });
 
 test("chat completions can call a Claude settings model directly", async () => {
