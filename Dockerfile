@@ -15,7 +15,11 @@ RUN apt-get update \
 
 WORKDIR /tmp
 RUN echo "CLAUDE_INSTALL_CACHE_BUST=${CLAUDE_INSTALL_CACHE_BUST}" \
-  && if [ "$INSTALL_CLAUDE" = "true" ]; then curl -fsSL https://claude.ai/install.sh | bash; fi
+  && if [ "$INSTALL_CLAUDE" = "true" ]; then \
+    curl -fsSL https://claude.ai/install.sh | bash \
+    && ln -sf "$(command -v claude)" /usr/local/bin/claude \
+    && claude --version; \
+  fi
 
 WORKDIR /app
 COPY package.json ./

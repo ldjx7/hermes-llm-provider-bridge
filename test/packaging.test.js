@@ -10,6 +10,9 @@ test("Docker image bootstraps bridge config when it is not mounted", async () =>
   assert.match(dockerfile, /COPY docker-entrypoint\.sh/);
   assert.match(dockerfile, /ENTRYPOINT \["\.\/docker-entrypoint\.sh"\]/);
   assert.doesNotMatch(dockerfile, /CMD \["node", "src\/server\.js", "--config"/);
+  assert.match(dockerfile, /command -v claude/);
+  assert.match(dockerfile, /claude --version/);
+  assert.match(dockerfile, /\/usr\/local\/bin\/claude/);
   assert.match(entrypoint, /bridge\.config\.example\.json/);
   assert.match(entrypoint, /cp "\/app\/bridge\.config\.example\.json" "\$BRIDGE_CONFIG"/);
   assert.equal(exampleConfig.claude.stdin, "{{prompt}}");

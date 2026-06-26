@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.8] - 2026-06-26
+
+### Fixed
+
+- Verify Claude Code is installed during Docker builds and expose it at `/usr/local/bin/claude` for stable runtime lookup.
+
 ## [0.1.7] - 2026-06-26
 
 ### Fixed
