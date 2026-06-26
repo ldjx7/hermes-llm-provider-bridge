@@ -26,4 +26,4 @@ COPY docker-entrypoint.sh ./docker-entrypoint.sh
 EXPOSE 18777
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["node", "src/server.js", "--config", "/config/bridge.config.json"]
+CMD ["node", "src/server.js"]

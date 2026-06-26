@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## [0.1.7] - 2026-06-26
+
+### Fixed
+
+- Stop Docker's default command from hardcoding `/config/bridge.config.json`, so `BRIDGE_CONFIG` can point to a mounted custom config file.
+
 ## [0.1.6] - 2026-06-24
 
 ### Fixed
