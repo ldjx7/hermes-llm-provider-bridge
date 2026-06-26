@@ -16,8 +16,12 @@ RUN apt-get update \
 WORKDIR /tmp
 RUN echo "CLAUDE_INSTALL_CACHE_BUST=${CLAUDE_INSTALL_CACHE_BUST}" \
   && if [ "$INSTALL_CLAUDE" = "true" ]; then \
-    curl -fsSL https://claude.ai/install.sh | bash \
-    && ln -sf "$(command -v claude)" /usr/local/bin/claude \
+    curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 --max-time 300 \
+      -o /tmp/claude-install.sh https://claude.ai/install.sh \
+    && sh /tmp/claude-install.sh \
+    && claude_path="$(command -v claude)" \
+    && test -n "$claude_path" \
+    && ln -sf "$claude_path" /usr/local/bin/claude \
     && claude --version; \
   fi
 

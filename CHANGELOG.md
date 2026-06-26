@@ -11,6 +11,10 @@ The format follows a simple versioned changelog. This project uses semantic vers
 - Add an `openai-chat` profile provider for direct OpenAI-compatible `/v1/chat/completions` upstreams.
 - Allow OpenAI upstream credentials to be read from mounted `settings.json` values such as `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, or from explicit `baseUrl` and `apiKey` profile fields.
 
+### Fixed
+
+- Download the Claude Code installer to a file with retry handling during Docker builds before executing it.
+
 ## [0.1.8] - 2026-06-26
 
 ### Fixed
