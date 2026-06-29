@@ -18,6 +18,16 @@ if (mode === "stdin-echo") {
       markerInArgv: process.argv.slice(2).some((arg) => arg.includes(marker))
     })
   }));
+} else if (mode === "env-dump") {
+  process.stdout.write(JSON.stringify({
+    type: "final",
+    content: JSON.stringify({
+      ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+      ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+      ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME
+    })
+  }));
 } else if (mode === "invalid-tool") {
   if (next === 1) {
     process.stdout.write(JSON.stringify({

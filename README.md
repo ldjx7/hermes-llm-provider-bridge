@@ -308,6 +308,61 @@ or from the mounted `settings.json` under `configDir`:
 
 `OPENAI_BASE_URL` and `OPENAI_API_KEY` are also supported in `settings.json`. Tool calls returned by the upstream are passed back to Hermes; the bridge does not execute them.
 
+If you want to keep the Claude Code CLI in the path while routing it through an OpenAI-compatible upstream, enable the built-in local Anthropic proxy. This mirrors the cc-switch takeover pattern without running cc-switch: the bridge starts a local Anthropic-compatible endpoint, injects `ANTHROPIC_BASE_URL` and a placeholder token into the Claude CLI process, maps a Claude-safe route model to the real upstream model, and converts Anthropic Messages requests to OpenAI Chat Completions.
+
+```json
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 18777
+  },
+  "maxConcurrentRequests": 1,
+  "localAnthropicProxy": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 18778,
+    "baseUrl": "https://api.example.com",
+    "apiKeyEnv": "UPSTREAM_API_KEY",
+    "models": [
+      {
+        "id": "claude-opus-4-8",
+        "backendModel": "gpt-5.4"
+      }
+    ]
+  },
+  "defaultProfile": "minimax-cli",
+  "profiles": {
+    "minimax-cli": {
+      "provider": "cli-json",
+      "ownedBy": "minimax",
+      "configDir": "/profiles/claude-max",
+      "timeoutMs": 180000,
+      "repairRetries": 1,
+      "command": "claude",
+      "args": [
+        "--model",
+        "{{backendModel}}",
+        "--print",
+        "--output-format",
+        "json",
+        "--no-session-persistence"
+      ],
+      "stdin": "{{prompt}}",
+      "models": [
+        {
+          "id": "hermes-model",
+          "backendModel": "claude-opus-4-8"
+        }
+      ]
+    }
+  }
+}
+```
+
+In this mode, Hermes requests `hermes-model`, Claude Code sees `claude-opus-4-8`, and the local proxy sends `gpt-5.4` to the OpenAI-compatible upstream. Keep the upstream secret in `apiKeyEnv` where possible instead of hardcoding it in the config.
+
+The local proxy defaults to `127.0.0.1:18778` and requires the injected placeholder token (`PROXY_MANAGED`) on `/v1/messages`. You can set `localAnthropicProxy.authTokenPlaceholder` to a different placeholder if needed; avoid setting `requireAuth: false` unless the proxy is strictly isolated.
+
 The CLI backend must print JSON that looks like one of these:
 
 ```json

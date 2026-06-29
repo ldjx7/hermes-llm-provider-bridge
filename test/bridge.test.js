@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { createLocalAnthropicProxy } from "../src/anthropic-proxy.js";
 import { createApp } from "../src/app.js";
 import { claudeProviderConfig } from "../src/claude-settings.js";
 import { switchProfile, getActiveProfileName } from "../src/config-store.js";
@@ -435,6 +436,153 @@ test("openai-chat provider returns upstream tool calls without executing tools",
   } finally {
     await upstream.close();
   }
+});
+
+test("local Anthropic proxy maps Claude routes to an OpenAI-compatible upstream", async () => {
+  const originalApiKey = process.env.LOCAL_ANTHROPIC_PROXY_TEST_KEY;
+  process.env.LOCAL_ANTHROPIC_PROXY_TEST_KEY = "upstream-secret";
+  const upstream = await openAIUpstream(({ req, body }) => {
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/v1/chat/completions");
+    assert.equal(req.headers.authorization, "Bearer upstream-secret");
+    assert.equal(body.model, "gpt-5.4");
+    assert.equal(body.messages[0].role, "system");
+    assert.equal(body.messages[0].content, "You are concise.");
+    assert.equal(body.messages[1].content, "hello");
+    assert.equal(body.max_tokens, 128);
+    return {
+      body: {
+        id: "chatcmpl-local-proxy",
+        object: "chat.completion",
+        choices: [{
+          index: 0,
+          message: { role: "assistant", content: "proxy ok" },
+          finish_reason: "stop"
+        }],
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 }
+      }
+    };
+  });
+
+  try {
+    const proxy = createLocalAnthropicProxy({
+      config: {
+        localAnthropicProxy: {
+          enabled: true,
+          baseUrl: upstream.baseUrl,
+          apiKeyEnv: "LOCAL_ANTHROPIC_PROXY_TEST_KEY",
+          models: [{ id: "claude-opus-4-8", backendModel: "gpt-5.4" }]
+        }
+      }
+    });
+
+    const response = await proxy.inject({
+      method: "POST",
+      url: "/v1/messages",
+      headers: { "content-type": "application/json", "x-api-key": "PROXY_MANAGED" },
+      body: JSON.stringify({
+        model: "claude-opus-4-8",
+        system: "You are concise.",
+        max_tokens: 128,
+        messages: [{ role: "user", content: "hello" }]
+      })
+    });
+
+    upstream.assertNoErrors();
+    assert.equal(response.status, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.type, "message");
+    assert.equal(body.model, "claude-opus-4-8");
+    assert.deepEqual(body.content, [{ type: "text", text: "proxy ok" }]);
+    assert.equal(body.usage.input_tokens, 3);
+    assert.equal(body.usage.output_tokens, 2);
+  } finally {
+    await upstream.close();
+    if (originalApiKey === undefined) {
+      delete process.env.LOCAL_ANTHROPIC_PROXY_TEST_KEY;
+    } else {
+      process.env.LOCAL_ANTHROPIC_PROXY_TEST_KEY = originalApiKey;
+    }
+  }
+});
+
+test("local Anthropic proxy rejects unconfigured model routes", async () => {
+  const proxy = createLocalAnthropicProxy({
+    config: {
+      localAnthropicProxy: {
+        enabled: true,
+        baseUrl: "http://127.0.0.1:9/v1",
+        models: [{ id: "claude-opus-4-8", backendModel: "gpt-5.4" }]
+      }
+    }
+  });
+
+  const response = await proxy.inject({
+    method: "POST",
+    url: "/v1/messages",
+    headers: { "content-type": "application/json", "x-api-key": "PROXY_MANAGED" },
+    body: JSON.stringify({
+      model: "gpt-5.4",
+      max_tokens: 128,
+      messages: [{ role: "user", content: "hello" }]
+    })
+  });
+
+  assert.equal(response.status, 400);
+  const body = JSON.parse(response.body);
+  assert.equal(body.error.type, "invalid_request_error");
+  assert.match(body.error.message, /Model "gpt-5\.4" is not available/);
+});
+
+test("local Anthropic proxy requires the managed placeholder token by default", async () => {
+  const proxy = createLocalAnthropicProxy({
+    config: {
+      localAnthropicProxy: {
+        enabled: true,
+        baseUrl: "http://127.0.0.1:9/v1",
+        models: [{ id: "claude-opus-4-8", backendModel: "gpt-5.4" }]
+      }
+    }
+  });
+
+  const response = await proxy.inject({
+    method: "POST",
+    url: "/v1/messages",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-opus-4-8",
+      max_tokens: 128,
+      messages: [{ role: "user", content: "hello" }]
+    })
+  });
+
+  assert.equal(response.status, 401);
+  const body = JSON.parse(response.body);
+  assert.equal(body.error.type, "authentication_error");
+});
+
+test("local Anthropic proxy returns bad_request for invalid JSON", async () => {
+  const proxy = createLocalAnthropicProxy({
+    config: {
+      localAnthropicProxy: {
+        enabled: true,
+        baseUrl: "http://127.0.0.1:9/v1",
+        models: [{ id: "claude-opus-4-8", backendModel: "gpt-5.4" }]
+      }
+    }
+  });
+
+  const response = await proxy.inject({
+    method: "POST",
+    url: "/v1/messages",
+    headers: { "content-type": "application/json", authorization: "Bearer PROXY_MANAGED" },
+    body: "{"
+  });
+
+  assert.equal(response.status, 400);
+  const body = JSON.parse(response.body);
+  assert.equal(body.error.type, "invalid_request_error");
+  assert.equal(body.error.message, "Request body must be valid JSON");
 });
 
 test("chat completions can call a Claude settings model directly", async () => {
@@ -1001,6 +1149,89 @@ test("cli-json can pass prompt through stdin instead of argv", async () => {
     markerInStdin: true,
     markerInArgv: false
   });
+});
+
+test("cli-json injects local Anthropic proxy takeover environment", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "hermes-bridge-cli-proxy-env-"));
+  const config = {
+    stateFile: path.join(dir, "state.json"),
+    localAnthropicProxy: {
+      enabled: true,
+      host: "127.0.0.1",
+      port: 18778,
+      baseUrl: "https://upstream.example/v1",
+      apiKeyEnv: "UPSTREAM_API_KEY",
+      models: [{ id: "claude-opus-4-8", backendModel: "gpt-5.4" }]
+    },
+    defaultProfile: "proxied-cli",
+    profiles: {
+      "proxied-cli": {
+        provider: "cli-json",
+        command: process.execPath,
+        args: [path.resolve("fixtures/fake-cli.js")],
+        env: { FAKE_CLI_MODE: "env-dump" },
+        repairRetries: 0,
+        models: [{ id: "hermes-model", backendModel: "claude-opus-4-8" }]
+      }
+    }
+  };
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    model: "hermes-model",
+    messages: [{ role: "user", content: "hello" }]
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(response.body.choices[0].message.content), {
+    ANTHROPIC_BASE_URL: "http://127.0.0.1:18778",
+    ANTHROPIC_AUTH_TOKEN: "PROXY_MANAGED",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4-8",
+    ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: "gpt-5.4"
+  });
+});
+
+test("cli-json leaves non-proxied backend models on their direct environment", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "hermes-bridge-cli-direct-env-"));
+  const config = {
+    stateFile: path.join(dir, "state.json"),
+    localAnthropicProxy: {
+      enabled: true,
+      host: "127.0.0.1",
+      port: 18778,
+      baseUrl: "https://upstream.example/v1",
+      apiKeyEnv: "UPSTREAM_API_KEY",
+      models: [{ id: "claude-opus-4-8", backendModel: "gpt-5.4" }]
+    },
+    defaultProfile: "direct-cli",
+    profiles: {
+      "direct-cli": {
+        provider: "cli-json",
+        command: process.execPath,
+        args: [path.resolve("fixtures/fake-cli.js")],
+        env: {
+          FAKE_CLI_MODE: "env-dump",
+          ANTHROPIC_BASE_URL: "https://direct.example",
+          ANTHROPIC_AUTH_TOKEN: "direct-token"
+        },
+        repairRetries: 0,
+        models: [{ id: "direct-model", backendModel: "claude-sonnet-4-6" }]
+      }
+    }
+  };
+  const app = createApp({ config });
+
+  const response = await request(app, "POST", "/v1/chat/completions", {
+    model: "direct-model",
+    messages: [{ role: "user", content: "hello" }]
+  });
+
+  assert.equal(response.status, 200);
+  const env = JSON.parse(response.body.choices[0].message.content);
+  assert.equal(env.ANTHROPIC_BASE_URL, "https://direct.example");
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, "direct-token");
+  assert.equal(env.ANTHROPIC_DEFAULT_OPUS_MODEL, undefined);
+  assert.equal(env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME, undefined);
 });
 
 test("cli-json rejects stdin prompts that exceed the configured stdin limit", async () => {

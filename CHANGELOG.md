@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format follows a simple versioned changelog. This project uses semantic versioning.
 
+## Unreleased
+
+### Added
+
+- Add an optional built-in local Anthropic proxy for `cli-json` profiles, allowing Claude Code CLI calls to be locally routed to OpenAI-compatible chat upstreams with Claude-safe route models and upstream model mapping.
+
 ## [0.1.9] - 2026-06-26
 
 ### Added

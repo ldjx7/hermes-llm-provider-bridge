@@ -2,6 +2,7 @@ import { appendFile, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
+import { localAnthropicProxyEnv } from "./anthropic-proxy.js";
 import { HttpError } from "./errors.js";
 import { normalizeCliResult, validateProviderResult } from "./openai.js";
 import { buildRepairPrompt, buildStructuredPrompt } from "./prompt.js";
@@ -24,7 +25,7 @@ export async function runProvider({ config, profileName, profile, model, request
 
   if (profile.provider === "cli-json") {
     const prompt = buildStructuredPrompt(request, { profileName, profile, model });
-    return await runCliJsonWithRepair(profile, model, prompt, request);
+    return await runCliJsonWithRepair(config, profile, model, prompt, request);
   }
 
   if (profile.provider === "openai-chat") {
@@ -198,14 +199,14 @@ function copyOptional(target, source, keys) {
   }
 }
 
-async function runCliJsonWithRepair(profile, model, prompt, request) {
+async function runCliJsonWithRepair(config, profile, model, prompt, request) {
   const maxAttempts = 1 + Math.max(0, Number(profile.repairRetries ?? 1) || 0);
   let currentPrompt = prompt;
   let lastStdout = "";
   let lastError;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    lastStdout = await runCli(profile, model, currentPrompt);
+    lastStdout = await runCli(config, profile, model, currentPrompt);
     let result;
     try {
       result = normalizeCliResult(lastStdout);
@@ -236,7 +237,7 @@ async function recordTestCall(config, call) {
   await appendFile(config.test.callsFile, `${JSON.stringify(call)}\n`);
 }
 
-async function runCli(profile, model, prompt) {
+async function runCli(config, profile, model, prompt) {
   const command = profile.command;
   if (!command) {
     throw new HttpError(400, "cli-json profile is missing command", "bad_config");
@@ -255,7 +256,8 @@ async function runCli(profile, model, prompt) {
 
   const env = {
     ...process.env,
-    ...(profile.env || {})
+    ...(profile.env || {}),
+    ...localAnthropicProxyEnv(config, model)
   };
   if (profile.configDir) {
     env.CLAUDE_CONFIG_DIR = profile.configDir;
